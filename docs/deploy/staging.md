@@ -74,14 +74,31 @@ git push -u origin staging
 branch Render watches. Work happens on feature branches, merges into `staging`,
 and only reaches `main` once it has been exercised on staging.
 
-## 3. Create the Render service
+## 3. Attach the Render service to the Blueprint
 
-1. Render dashboard → **New → Blueprint** → connect `jevvii/ece`.
-2. Render reads `render.yaml` and proposes one web service, `ece-staging`.
-3. Fill the three `sync: false` values when prompted — `DATABASE_URL`,
-   `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`. Everything else is in the file.
-4. **Apply**. The first build runs `pnpm db:migrate` before `pnpm build`, creating
-   every table in the new Supabase database.
+The service lives in the **ECE Accounting → staging** project environment. Render
+matches Blueprint resources by name, so `render.yaml` declares that project and
+environment explicitly and reuses the existing `ece-staging` name to *adopt* the
+service rather than create a second one.
+
+1. Render dashboard → **Blueprints → New Blueprint** → connect `jevvii/ece`, and
+   point it at the `staging` branch.
+2. **Stop at the preview.** It must show that it will update the existing
+   `ece-staging` service. If it proposes creating `ece-staging` with a random
+   suffix, or creating a second `ECE Accounting` project, the names do not match
+   what is in the dashboard — cancel and correct `render.yaml` before applying.
+3. Apply. Existing environment variable values are preserved; `sync: false` only
+   means the value is not sourced from the file.
+4. The first build runs `pnpm db:migrate` before `pnpm build`.
+
+Once the Blueprint is attached, `render.yaml` is the source of truth for the
+service again: build command, start command, health check, branch and plan should
+be edited here rather than in the dashboard. Dashboard changes get reverted on the
+next sync.
+
+> A Blueprint can only manage a resource from one place, and a service can only
+> belong to one Blueprint. Do not also declare `ece-staging` at the root of this
+> file or in another Blueprint.
 
 The service runs on the **free** plan. It spins down after roughly 15 minutes
 idle, so the first request afterwards pays a cold start — expect the accountant to

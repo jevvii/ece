@@ -1,38 +1,47 @@
-# Render Blueprint — ECE staging.
+# Render Blueprint — ECE staging, scoped to the ECE Accounting project.
 #
-# One web service, deployed only from the `staging` branch. The database and
-# file storage live in Supabase, so nothing is provisioned here except compute.
+# Render matches resources by name, so `ECE Accounting`, `staging` and
+# `ece-staging` below must match the names already in the dashboard exactly.
+# A mismatch makes Render create a new project or service instead of adopting
+# the existing one. Always read the Blueprint preview before applying: it must
+# say it will *update* `ece-staging`, not create it.
 #
-# Secrets (`sync: false`) are entered once in the Render dashboard and never
-# committed. See docs/deploy/staging.md for the full runbook.
+# The database and file storage live in Supabase, so nothing is provisioned here
+# except compute. Secrets (`sync: false`) are entered in the Render dashboard and
+# never committed. See docs/deploy/staging.md for the runbook.
 
-services:
-  - type: web
-    name: ece-staging
-    runtime: node
-    region: singapore
-    # Free tier spins down after ~15 minutes idle, so the first request pays a
-    # cold start. Move to `starter` if accountant walkthroughs need to be snappy.
-    plan: free
-    branch: staging
-    autoDeploy: true
-    numInstances: 1
-    healthCheckPath: /api/health
-    buildCommand: >-
-      pnpm install --frozen-lockfile --prod=false
-      && pnpm db:migrate
-      && pnpm build
-    startCommand: pnpm start
-    envVars:
-      - key: NODE_ENV
-        value: production
-      - key: DATABASE_URL
-        sync: false
-      - key: STORAGE_BACKEND
-        value: supabase
-      - key: SUPABASE_URL
-        sync: false
-      - key: SUPABASE_SERVICE_ROLE_KEY
-        sync: false
-      - key: SUPABASE_STORAGE_BUCKET
-        value: ece-uploads
+projects:
+  - name: ECE Accounting
+    environments:
+      - name: staging
+        services:
+          - type: web
+            name: ece-staging
+            runtime: node
+            region: singapore
+            # Free tier spins down after ~15 minutes idle, so the first request
+            # pays a cold start. Move to `starter` if walkthroughs need to be
+            # snappy; `region` is immutable after creation, `plan` is not.
+            plan: free
+            branch: staging
+            autoDeploy: true
+            numInstances: 1
+            healthCheckPath: /api/health
+            buildCommand: >-
+              pnpm install --frozen-lockfile --prod=false
+              && pnpm db:migrate
+              && pnpm build
+            startCommand: pnpm start
+            envVars:
+              - key: NODE_ENV
+                value: production
+              - key: DATABASE_URL
+                sync: false
+              - key: STORAGE_BACKEND
+                value: supabase
+              - key: SUPABASE_URL
+                sync: false
+              - key: SUPABASE_SERVICE_ROLE_KEY
+                sync: false
+              - key: SUPABASE_STORAGE_BUCKET
+                value: ece-uploads

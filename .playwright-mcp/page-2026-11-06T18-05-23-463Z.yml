@@ -1,0 +1,31 @@
+- generic [active] [ref=e1]:
+  - main [ref=e2]:
+    - link "ECE Accounting" [ref=e4] [cursor=pointer]:
+      - /url: /sign-in
+      - generic [ref=e6]: ECE
+      - generic [ref=e7]: Accounting
+    - generic [ref=e9]:
+      - paragraph [ref=e10]: Bureau access
+      - heading "Welcome back." [level=1] [ref=e12]
+      - paragraph [ref=e13]: One login per person. Your seats and companies are managed in Admin.
+      - generic [ref=e14]:
+        - generic [ref=e15]: Work email
+        - textbox "Work email" [ref=e16]: maria@tala.ph
+        - generic [ref=e17]: Password
+        - textbox "Password" [ref=e18]: payroll123
+        - button "Sign in" [ref=e19]
+      - generic [ref=e20]:
+        - generic [ref=e21]:
+          - paragraph [ref=e23]: Demo accounts
+          - paragraph [ref=e24]: payroll123
+        - list [ref=e25]:
+          - listitem [ref=e26]:
+            - generic [ref=e27]: maria@tala.ph
+            - generic [ref=e28]: Bureau admin
+          - listitem [ref=e29]:
+            - generic [ref=e30]: jose@bayanihan.ph
+            - generic [ref=e31]: Payroll officer
+          - listitem [ref=e32]:
+            - generic [ref=e33]: ana@tala.ph
+            - generic [ref=e34]: Approver
+  - alert [ref=e35]

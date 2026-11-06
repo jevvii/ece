@@ -1,0 +1,326 @@
+- generic [active] [ref=f1e1]:
+  - alert [ref=f1e53]: Time report
+  - banner [ref=f1e54]:
+    - generic [ref=f1e55]:
+      - link "ECE Accounting, workspace home" [ref=f1e56] [cursor=pointer]:
+        - /url: /
+        - generic [ref=f1e58]: ECE
+        - generic [ref=f1e59]: Accounting
+      - group [ref=f1e61]:
+        - generic "Bayanihan Trading Corp. 26–10" [ref=f1e62] [cursor=pointer]:
+          - generic [ref=f1e63]: Bayanihan Trading Corp.
+          - generic [ref=f1e64]: 26–10
+      - generic [ref=f1e67]:
+        - generic [aria-hidden] [ref=f1e68]: /
+        - generic [ref=f1e69]: Payroll / Time Report / Import
+      - generic [ref=f1e70]:
+        - generic [ref=f1e71]: November 2026 · Cutoff 1
+        - generic "Maria Tala · maria@tala.ph" [ref=f1e72]: MT
+  - main [ref=f1e73]:
+    - link "← Time Report" [ref=f1e74] [cursor=pointer]:
+      - /url: /payroll/time-report
+    - generic [ref=f1e75]:
+      - generic [ref=f1e76]:
+        - paragraph [ref=f1e77]: CSV · Sheet1
+        - heading "Time report" [level=1] [ref=f1e79]
+        - paragraph [ref=f1e80]:
+          - generic [ref=f1e81]: sample-attendance.csv
+          - generic [aria-hidden] [ref=f1e82]: ·
+          - generic [ref=f1e83]: November 2026 · cutoff 1 · Oct 26 – Nov 10
+      - generic [ref=f1e84]:
+        - paragraph [ref=f1e85]: Status
+        - paragraph [ref=f1e86]: Mapping
+        - paragraph [ref=f1e87]: 0 rows · 0 day records
+    - paragraph [ref=f1e89]: Header spans 1 row; data begins on row 2. Columns were proposed from the header — check the employee code, day columns and units before importing.
+    - generic [ref=f1e90]:
+      - generic [ref=f1e91]:
+        - generic [ref=f1e92]:
+          - generic [ref=f1e93]: Day values are
+          - combobox "Day values are" [ref=f1e94]:
+            - option "Hours (8.0 = 8h)" [selected]
+            - option "Tenths of an hour (80 = 8h)"
+            - option "Minutes (480 = 8h)"
+            - option "Days (1 = 8h)"
+        - generic [ref=f1e95]:
+          - generic [ref=f1e96]: Save profile as
+          - textbox "Save profile as" [ref=f1e97]: Sheet1 · 874ee6067db2ef29
+        - button "Confirm mapping and import" [ref=f1e99]
+      - generic [ref=f1e100]:
+        - generic [ref=f1e101]:
+          - heading "Column mapping" [level=2] [ref=f1e102]
+          - generic [ref=f1e103]: 20 columns
+        - table [ref=f1e105]:
+          - rowgroup [ref=f1e106]:
+            - row [ref=f1e107]:
+              - columnheader "#" [ref=f1e108]
+              - columnheader "Header" [ref=f1e109]
+              - columnheader "Sample" [ref=f1e110]
+              - columnheader "Role" [ref=f1e111]
+              - columnheader "Code / day" [ref=f1e112]
+          - rowgroup [ref=f1e113]:
+            - row [ref=f1e114]:
+              - cell "0" [ref=f1e115]
+              - cell "Employee code" [ref=f1e116]
+              - cell "BAY-0001" [ref=f1e117]
+              - cell "Employee code" [ref=f1e118]:
+                - combobox [ref=f1e119]:
+                  - option "Ignore"
+                  - option "Employee code" [selected]
+                  - option "Employee name"
+                  - option "Day hours"
+                  - option "Premium bucket"
+                  - option "Source total"
+              - cell "—" [ref=f1e120]
+            - row [ref=f1e122]:
+              - cell "1" [ref=f1e123]
+              - cell "Employee name" [ref=f1e124]
+              - cell "Santos, Maria Clara" [ref=f1e125]
+              - cell "Employee name" [ref=f1e126]:
+                - combobox [ref=f1e127]:
+                  - option "Ignore"
+                  - option "Employee code"
+                  - option "Employee name" [selected]
+                  - option "Day hours"
+                  - option "Premium bucket"
+                  - option "Source total"
+              - cell "—" [ref=f1e128]
+            - row [ref=f1e130]:
+              - cell "2" [ref=f1e131]
+              - cell "Day 26" [ref=f1e132]
+              - cell "8" [ref=f1e133]
+              - cell "Day hours" [ref=f1e134]:
+                - combobox [ref=f1e135]:
+                  - option "Ignore"
+                  - option "Employee code"
+                  - option "Employee name"
+                  - option "Day hours" [selected]
+                  - option "Premium bucket"
+                  - option "Source total"
+              - cell "day 26" [ref=f1e136]
+            - row [ref=f1e138]:
+              - cell "3" [ref=f1e139]
+              - cell "Day 27" [ref=f1e140]
+              - cell "8" [ref=f1e141]
+              - cell "Day hours" [ref=f1e142]:
+                - combobox [ref=f1e143]:
+                  - option "Ignore"
+                  - option "Employee code"
+                  - option "Employee name"
+                  - option "Day hours" [selected]
+                  - option "Premium bucket"
+                  - option "Source total"
+              - cell "day 27" [ref=f1e144]
+            - row [ref=f1e146]:
+              - cell "4" [ref=f1e147]
+              - cell "Day 28" [ref=f1e148]
+              - cell "8" [ref=f1e149]
+              - cell "Day hours" [ref=f1e150]:
+                - combobox [ref=f1e151]:
+                  - option "Ignore"
+                  - option "Employee code"
+                  - option "Employee name"
+                  - option "Day hours" [selected]
+                  - option "Premium bucket"
+                  - option "Source total"
+              - cell "day 28" [ref=f1e152]
+            - row [ref=f1e154]:
+              - cell "5" [ref=f1e155]
+              - cell "Day 29" [ref=f1e156]
+              - cell "8" [ref=f1e157]
+              - cell "Day hours" [ref=f1e158]:
+                - combobox [ref=f1e159]:
+                  - option "Ignore"
+                  - option "Employee code"
+                  - option "Employee name"
+                  - option "Day hours" [selected]
+                  - option "Premium bucket"
+                  - option "Source total"
+              - cell "day 29" [ref=f1e160]
+            - row [ref=f1e162]:
+              - cell "6" [ref=f1e163]
+              - cell "Day 30" [ref=f1e164]
+              - cell "8" [ref=f1e165]
+              - cell "Day hours" [ref=f1e166]:
+                - combobox [ref=f1e167]:
+                  - option "Ignore"
+                  - option "Employee code"
+                  - option "Employee name"
+                  - option "Day hours" [selected]
+                  - option "Premium bucket"
+                  - option "Source total"
+              - cell "day 30" [ref=f1e168]
+            - row [ref=f1e170]:
+              - cell "7" [ref=f1e171]
+              - cell "Day 31" [ref=f1e172]
+              - cell "8" [ref=f1e173]
+              - cell "Day hours" [ref=f1e174]:
+                - combobox [ref=f1e175]:
+                  - option "Ignore"
+                  - option "Employee code"
+                  - option "Employee name"
+                  - option "Day hours" [selected]
+                  - option "Premium bucket"
+                  - option "Source total"
+              - cell "day 31" [ref=f1e176]
+            - row [ref=f1e178]:
+              - cell "8" [ref=f1e179]
+              - cell "Day 1" [ref=f1e180]
+              - cell "8" [ref=f1e181]
+              - cell "Day hours" [ref=f1e182]:
+                - combobox [ref=f1e183]:
+                  - option "Ignore"
+                  - option "Employee code"
+                  - option "Employee name"
+                  - option "Day hours" [selected]
+                  - option "Premium bucket"
+                  - option "Source total"
+              - cell "day 1" [ref=f1e184]
+            - row [ref=f1e186]:
+              - cell "9" [ref=f1e187]
+              - cell "Day 2" [ref=f1e188]
+              - cell "8" [ref=f1e189]
+              - cell "Day hours" [ref=f1e190]:
+                - combobox [ref=f1e191]:
+                  - option "Ignore"
+                  - option "Employee code"
+                  - option "Employee name"
+                  - option "Day hours" [selected]
+                  - option "Premium bucket"
+                  - option "Source total"
+              - cell "day 2" [ref=f1e192]
+            - row [ref=f1e194]:
+              - cell "10" [ref=f1e195]
+              - cell "Day 3" [ref=f1e196]
+              - cell "8" [ref=f1e197]
+              - cell "Day hours" [ref=f1e198]:
+                - combobox [ref=f1e199]:
+                  - option "Ignore"
+                  - option "Employee code"
+                  - option "Employee name"
+                  - option "Day hours" [selected]
+                  - option "Premium bucket"
+                  - option "Source total"
+              - cell "day 3" [ref=f1e200]
+            - row [ref=f1e202]:
+              - cell "11" [ref=f1e203]
+              - cell "Day 4" [ref=f1e204]
+              - cell "8" [ref=f1e205]
+              - cell "Day hours" [ref=f1e206]:
+                - combobox [ref=f1e207]:
+                  - option "Ignore"
+                  - option "Employee code"
+                  - option "Employee name"
+                  - option "Day hours" [selected]
+                  - option "Premium bucket"
+                  - option "Source total"
+              - cell "day 4" [ref=f1e208]
+            - row [ref=f1e210]:
+              - cell "12" [ref=f1e211]
+              - cell "Day 5" [ref=f1e212]
+              - cell "8" [ref=f1e213]
+              - cell "Day hours" [ref=f1e214]:
+                - combobox [ref=f1e215]:
+                  - option "Ignore"
+                  - option "Employee code"
+                  - option "Employee name"
+                  - option "Day hours" [selected]
+                  - option "Premium bucket"
+                  - option "Source total"
+              - cell "day 5" [ref=f1e216]
+            - row [ref=f1e218]:
+              - cell "13" [ref=f1e219]
+              - cell "Day 6" [ref=f1e220]
+              - cell "8" [ref=f1e221]
+              - cell "Day hours" [ref=f1e222]:
+                - combobox [ref=f1e223]:
+                  - option "Ignore"
+                  - option "Employee code"
+                  - option "Employee name"
+                  - option "Day hours" [selected]
+                  - option "Premium bucket"
+                  - option "Source total"
+              - cell "day 6" [ref=f1e224]
+            - row [ref=f1e226]:
+              - cell "14" [ref=f1e227]
+              - cell "Day 7" [ref=f1e228]
+              - cell "8" [ref=f1e229]
+              - cell "Day hours" [ref=f1e230]:
+                - combobox [ref=f1e231]:
+                  - option "Ignore"
+                  - option "Employee code"
+                  - option "Employee name"
+                  - option "Day hours" [selected]
+                  - option "Premium bucket"
+                  - option "Source total"
+              - cell "day 7" [ref=f1e232]
+            - row [ref=f1e234]:
+              - cell "15" [ref=f1e235]
+              - cell "Day 8" [ref=f1e236]
+              - cell "8" [ref=f1e237]
+              - cell "Day hours" [ref=f1e238]:
+                - combobox [ref=f1e239]:
+                  - option "Ignore"
+                  - option "Employee code"
+                  - option "Employee name"
+                  - option "Day hours" [selected]
+                  - option "Premium bucket"
+                  - option "Source total"
+              - cell "day 8" [ref=f1e240]
+            - row [ref=f1e242]:
+              - cell "16" [ref=f1e243]
+              - cell "Day 9" [ref=f1e244]
+              - cell "8" [ref=f1e245]
+              - cell "Day hours" [ref=f1e246]:
+                - combobox [ref=f1e247]:
+                  - option "Ignore"
+                  - option "Employee code"
+                  - option "Employee name"
+                  - option "Day hours" [selected]
+                  - option "Premium bucket"
+                  - option "Source total"
+              - cell "day 9" [ref=f1e248]
+            - row [ref=f1e250]:
+              - cell "17" [ref=f1e251]
+              - cell "Day 10" [ref=f1e252]
+              - cell "8" [ref=f1e253]
+              - cell "Day hours" [ref=f1e254]:
+                - combobox [ref=f1e255]:
+                  - option "Ignore"
+                  - option "Employee code"
+                  - option "Employee name"
+                  - option "Day hours" [selected]
+                  - option "Premium bucket"
+                  - option "Source total"
+              - cell "day 10" [ref=f1e256]
+            - row [ref=f1e258]:
+              - cell "18" [ref=f1e259]
+              - cell "PRESENT" [ref=f1e260]
+              - cell "128" [ref=f1e261]
+              - cell "Source total" [ref=f1e262]:
+                - combobox [ref=f1e263]:
+                  - option "Ignore"
+                  - option "Employee code"
+                  - option "Employee name"
+                  - option "Day hours"
+                  - option "Premium bucket"
+                  - option "Source total" [selected]
+              - cell [ref=f1e264]:
+                - textbox [ref=f1e265]: PRESENT_TOTAL
+            - row [ref=f1e266]:
+              - cell "19" [ref=f1e267]
+              - cell "ROT" [ref=f1e268]
+              - cell "2" [ref=f1e269]
+              - cell "Premium bucket" [ref=f1e270]:
+                - combobox [ref=f1e271]:
+                  - option "Ignore"
+                  - option "Employee code"
+                  - option "Employee name"
+                  - option "Day hours"
+                  - option "Premium bucket" [selected]
+                  - option "Source total"
+              - cell [ref=f1e272]:
+                - textbox [ref=f1e273]: ROT
+  - contentinfo [ref=f1e274]:
+    - generic [ref=f1e275]:
+      - generic [ref=f1e276]: Ledger rules PH-2026.1·pending accountant approval
+      - generic [ref=f1e279]: Demo workspace · synthetic data

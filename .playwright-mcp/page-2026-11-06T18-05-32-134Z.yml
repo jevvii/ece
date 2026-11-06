@@ -1,0 +1,88 @@
+- generic [active] [ref=e1]:
+  - alert [ref=e35]: One ledger. Every department.
+  - banner [ref=e36]:
+    - generic [ref=e37]:
+      - link "ECE Accounting, workspace home" [ref=e38] [cursor=pointer]:
+        - /url: /
+        - generic [ref=e40]: ECE
+        - generic [ref=e41]: Accounting
+      - group [ref=e43]:
+        - generic "Bayanihan Trading Corp. 26–10" [ref=e44] [cursor=pointer]:
+          - generic [ref=e45]: Bayanihan Trading Corp.
+          - generic [ref=e46]: 26–10
+      - generic [ref=e49]:
+        - generic [ref=e50]: November 2026 · Cutoff 1
+        - generic "Maria Tala · maria@tala.ph" [ref=e51]: MT
+  - main [ref=e52]:
+    - generic [ref=e53]:
+      - generic [ref=e54]:
+        - paragraph [ref=e55]: Workspace · 2 companies
+        - heading "One ledger. Every department." [level=1] [ref=e57]: One ledger.Every department.
+        - paragraph [ref=e58]: Bayanihan Trading is set up to 4 of 10 stages. Every module shares this company, its chart of accounts, and one audit trail — no second login.
+      - generic [ref=e59]:
+        - paragraph [ref=e60]: Dataset PH-2026.1
+        - paragraph [ref=e61]: Statutory rules pending approval
+        - paragraph [ref=e62]: SSS · PhilHealth · Pag-IBIG · BIR
+    - generic [ref=e63]:
+      - generic [ref=e64]:
+        - generic [ref=e65]: "01"
+        - generic [ref=e70]:
+          - heading "Cash Management" [level=2] [ref=e71]
+          - paragraph [ref=e72]: Receipts, disbursements, and bank reconciliation.
+        - generic [ref=e73]: Planned
+      - generic [ref=e77]:
+        - generic [ref=e78]: "02"
+        - generic [ref=e84]:
+          - heading "Billing and Collection" [level=2] [ref=e85]
+          - paragraph [ref=e86]: Invoices, statements of account, and receivables.
+        - generic [ref=e87]: Planned
+      - generic [ref=e91]:
+        - generic [ref=e92]: "03"
+        - generic [ref=e98]:
+          - heading "Purchases and Disbursement" [level=2] [ref=e99]
+          - paragraph [ref=e100]: Purchase orders, supplier bills, and payments.
+        - generic [ref=e101]: Planned
+      - generic [ref=e105]:
+        - generic [ref=e106]: "04"
+        - generic [ref=e112]:
+          - heading "Fixed Assets" [level=2] [ref=e113]
+          - paragraph [ref=e114]: Registers, depreciation schedules, and disposals.
+        - generic [ref=e115]: Planned
+      - link "05 Admin Company setup, employees, ranks, access, numbering. Shared area" [ref=e119] [cursor=pointer]:
+        - /url: /modules/admin
+        - generic [ref=e120]: "05"
+        - generic [ref=e125]:
+          - heading "Admin" [level=2] [ref=e126]
+          - paragraph [ref=e127]: Company setup, employees, ranks, access, numbering.
+        - generic [ref=e128]: Shared area
+      - link "06 Reports Financial statements, tax reports, cross-module analysis. Shared area" [ref=e132] [cursor=pointer]:
+        - /url: /modules/reports
+        - generic [ref=e133]: "06"
+        - generic [ref=e137]:
+          - heading "Reports" [level=2] [ref=e138]
+          - paragraph [ref=e139]: Financial statements, tax reports, cross-module analysis.
+        - generic [ref=e140]: Shared area
+      - link "07 Payroll Time, computation, payslips, leaves, annualization. Cutoff 1 open" [ref=e144] [cursor=pointer]:
+        - /url: /payroll
+        - generic [ref=e145]: "07"
+        - generic [ref=e151]:
+          - heading "Payroll" [level=2] [ref=e152]
+          - paragraph [ref=e153]: Time, computation, payslips, leaves, annualization.
+        - generic [ref=e154]: Cutoff 1 open
+      - generic [ref=e160]:
+        - generic [ref=e161]: "08"
+        - generic [ref=e166]:
+          - heading "Inventory" [level=2] [ref=e167]
+          - paragraph [ref=e168]: Items, stock movements, and valuation.
+        - generic [ref=e169]: Planned
+      - generic [ref=e173]:
+        - generic [ref=e174]: "09"
+        - generic [ref=e181]:
+          - heading "Others" [level=2] [ref=e182]
+          - paragraph [ref=e183]: Journals, periods, tax register, audit trail.
+        - generic [ref=e184]: Planned
+    - paragraph [ref=e188]: Modules marked Planned are present in the map but have no screens yet. They are never simulated.
+  - contentinfo [ref=e190]:
+    - generic [ref=e191]:
+      - generic [ref=e192]: Ledger rules PH-2026.1·pending accountant approval
+      - generic [ref=e195]: Demo workspace · synthetic data
