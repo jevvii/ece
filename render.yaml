@@ -11,8 +11,9 @@ services:
     name: ece-staging
     runtime: node
     region: singapore
-    plan: starter # $7/mo. Free instances spin down after 15 minutes, which makes
-    # accountant walkthroughs slow and breaks reliability of the health check.
+    # Free tier spins down after ~15 minutes idle, so the first request pays a
+    # cold start. Move to `starter` if accountant walkthroughs need to be snappy.
+    plan: free
     branch: staging
     autoDeploy: true
     numInstances: 1

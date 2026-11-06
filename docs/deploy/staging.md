@@ -46,11 +46,19 @@ what you have to do once.
 > host is IPv6-only and Render cannot reach it. Use 5432, not the 6543 transaction
 > pooler, because migrations run DDL inside the build.
 
-The connection string looks like:
+The connection string must carry these parameters:
 
 ```
-postgresql://postgres.<project-ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres
+postgresql://postgres.<project-ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres?uselibpqcompat=true&sslmode=require
 ```
+
+`uselibpqcompat=true&sslmode=require` is not optional. The two drivers in this
+project disagree about a bare `sslmode=require`: `postgres.js` (the app) reads it
+as *encrypt without verifying*, while `pg` (drizzle-kit, which runs migrations in
+the build) upgrades it to `verify-full` and then fails against the pooler's
+certificate chain. With the libpq-compat flag, both encrypt and both connect.
+Bare `sslmode=require` breaks the build; no `sslmode` at all sends the app's
+traffic in plaintext.
 
 ## 2. Prepare the repository
 
@@ -75,10 +83,10 @@ and only reaches `main` once it has been exercised on staging.
 4. **Apply**. The first build runs `pnpm db:migrate` before `pnpm build`, creating
    every table in the new Supabase database.
 
-The service is `plan: starter` ($7/mo) on purpose. Free instances spin down after
-15 minutes of inactivity, which makes an accountant walkthrough wait on a cold
-start and turns the health check into noise. Switch to `free` in `render.yaml` if
-you want to trade that away.
+The service runs on the **free** plan. It spins down after roughly 15 minutes
+idle, so the first request afterwards pays a cold start — expect the accountant to
+wait on the initial page load if staging has been untouched. Move `plan` to
+`starter` in `render.yaml` if that becomes annoying; nothing else changes.
 
 ## 4. Seed the demo data — once
 
@@ -122,7 +130,7 @@ environment rehearsing production and merely resembling it.
 
 | Key | Value | Notes |
 | --- | --- | --- |
-| `DATABASE_URL` | Supabase session pooler, `:5432` | secret |
+| `DATABASE_URL` | session pooler, `:5432`, plus `?uselibpqcompat=true&sslmode=require` | secret |
 | `STORAGE_BACKEND` | `supabase` | `local` in development |
 | `SUPABASE_URL` | `https://<ref>.supabase.co` | secret |
 | `SUPABASE_SERVICE_ROLE_KEY` | service role secret | secret, server-only |
