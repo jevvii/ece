@@ -1,0 +1,203 @@
+@import "tailwindcss";
+
+@theme {
+  --color-paper: #ffffff;
+  --color-surface: #ffffff;
+  --color-surface-2: #f7f7f3;
+  --color-ink: #131310;
+  --color-ink-2: #3c3c37;
+  --color-muted: #6f6f66;
+  --color-rule: #e8e8e2;
+  --color-rule-strong: #d4d4cb;
+  --color-accent: #0c7a43;
+  --color-accent-soft: #f4faf6;
+  --color-warn: #956400;
+
+  --radius-card: 14px;
+}
+
+@theme inline {
+  --font-sans: var(--font-instrument-sans-src), system-ui, "Helvetica Neue", Helvetica, sans-serif;
+  --font-serif: var(--font-instrument-serif-src), Georgia, "Times New Roman", serif;
+  --font-mono: var(--font-plex-mono), "SF Mono", ui-monospace, monospace;
+  --font-instrument: var(--font-instrument-sans-src), system-ui, sans-serif;
+  --font-instrument-serif: var(--font-instrument-serif-src), Georgia, serif;
+}
+
+:root {
+  --ink: #131310;
+  --rule: #e8e8e2;
+}
+
+* {
+  border-color: var(--color-rule);
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  background-color: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+::selection {
+  background: #e9e3d3;
+  color: var(--color-ink);
+}
+
+button {
+  white-space: nowrap;
+}
+
+/* Wide registers: keep the scrollbar visible so the cut-off column never looks lost. */
+.scroll-x {
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-rule-strong) transparent;
+}
+
+.scroll-x::-webkit-scrollbar {
+  height: 8px;
+}
+
+.scroll-x::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scroll-x::-webkit-scrollbar-thumb {
+  background: var(--color-rule-strong);
+  border-radius: 999px;
+}
+
+:focus-visible {
+  outline: 1.5px solid var(--color-ink);
+  outline-offset: 3px;
+}
+
+/* Money and quantities: monospaced, tabular, one rung tighter. */
+.figure {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  letter-spacing: -0.01em;
+}
+
+/* Numerals line up in every table we will ever build. */
+.tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+/* Cards in a grid: rounded tiles with air between them. */
+.hairline-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.hairline-grid > * {
+  border: 1px solid var(--color-rule);
+  border-radius: 14px;
+  background-color: var(--color-surface);
+}
+
+.rise {
+  animation: rise 620ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: calc(var(--i, 0) * 45ms);
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rise {
+    animation: none;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+.onboard-step {
+  animation: onboard-in 300ms ease both;
+}
+
+@keyframes onboard-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .onboard-step {
+    animation: none;
+  }
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background: #ffffff;
+    background-image: none;
+  }
+  .payslip {
+    border: 0 !important;
+    padding: 0 !important;
+    break-after: page;
+  }
+  .payslip:last-child {
+    break-after: auto;
+  }
+  @page {
+    size: A4;
+    margin: 16mm;
+  }
+}
+
+/* Native company switcher, no JavaScript. */
+.switcher > summary {
+  list-style: none;
+  cursor: pointer;
+}
+.switcher > summary::-webkit-details-marker {
+  display: none;
+}
+.switcher[open] .chevron {
+  transform: rotate(180deg);
+}
+@media (max-width: 640px) {
+  .switcher[open] > div {
+    position: fixed;
+    top: 4rem;
+    left: 1rem;
+    right: 1rem;
+    width: auto;
+  }
+}
+.chevron {
+  transition: transform 160ms ease;
+}

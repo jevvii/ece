@@ -1,0 +1,1 @@
+ALTER TABLE "employees" ADD COLUMN "mwe_status" text DEFAULT 'unknown' NOT NULL;

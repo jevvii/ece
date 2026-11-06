@@ -1,0 +1,20 @@
+node_modules/
+.next/
+out/
+.env*
+!.env.example
+*.tsbuildinfo
+next-env.d.ts
+
+# Client source documents. Never commit: contains real employee names and pay.
+reference/
+*.ods
+*.xlsx
+*.pdf
+!public/forms/*.pdf
+
+# local dev database
+.pgdata/
+
+# uploaded client files (never commit)
+.data/

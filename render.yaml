@@ -1,0 +1,37 @@
+# Render Blueprint — ECE staging.
+#
+# One web service, deployed only from the `staging` branch. The database and
+# file storage live in Supabase, so nothing is provisioned here except compute.
+#
+# Secrets (`sync: false`) are entered once in the Render dashboard and never
+# committed. See docs/deploy/staging.md for the full runbook.
+
+services:
+  - type: web
+    name: ece-staging
+    runtime: node
+    region: singapore
+    plan: starter # $7/mo. Free instances spin down after 15 minutes, which makes
+    # accountant walkthroughs slow and breaks reliability of the health check.
+    branch: staging
+    autoDeploy: true
+    numInstances: 1
+    healthCheckPath: /api/health
+    buildCommand: >-
+      pnpm install --frozen-lockfile --prod=false
+      && pnpm db:migrate
+      && pnpm build
+    startCommand: pnpm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: STORAGE_BACKEND
+        value: supabase
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_STORAGE_BUCKET
+        value: ece-uploads
