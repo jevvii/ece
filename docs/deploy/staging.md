@@ -22,10 +22,19 @@ what you have to do once.
 
 1. New project → name `ece-staging`, region **Southeast Asia (Singapore)** to match
    the Render region, and save the database password somewhere safe.
-2. **Storage → New bucket** → name `ece-uploads`, keep it **private**. Do not add
-   policies; the service-role key bypasses RLS and is only used server-side.
-   - If the dashboard does not expose a private bucket without a policy, an empty
-     bucket with no policies is correct: server-side calls use the service role.
+2. **Storage → New bucket** → name `ece-uploads`, with these settings:
+   - **Public:** off. Nothing is served to a browser; the app reads files
+     server-side with the service-role key.
+   - **File size limit:** `12MB`. This is a backstop, deliberately *above* the
+     app's own 10 MiB check — the app measures 10 × 1024 × 1024, while Supabase
+     parses `12MB` as 12,000,000, so an exact `10MB` here would reject files the
+     app considers valid.
+   - **Allowed MIME types:** `text/csv` and
+     `application/vnd.oasis.opendocument.spreadsheet`.
+   - Leave policies empty. The service-role key bypasses RLS and is only ever
+     used server-side; these bucket limits are enforced by the Storage API for
+     every upload regardless of key.
+   Do not add policies; an empty bucket with no policies is correct.
 3. **Project Settings → API** → copy:
    - Project URL → `SUPABASE_URL`
    - `service_role` secret → `SUPABASE_SERVICE_ROLE_KEY` *(never ship this to a

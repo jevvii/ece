@@ -17,6 +17,17 @@ const LOCAL_ROOT = path.join(process.cwd(), ".data", "uploads");
 const SUPABASE_BUCKET = process.env.SUPABASE_STORAGE_BUCKET?.trim() || "ece-uploads";
 const TIMEOUT_MS = 15_000;
 
+/**
+ * Supabase enforces a bucket's `allowedMimeTypes` against the Content-Type we
+ * send, so the header has to describe the real file. Anything unrecognised is
+ * sent as octet-stream and will be rejected by a restricted bucket — which is
+ * the intended outcome.
+ */
+const CONTENT_TYPES: Record<string, string> = {
+  csv: "text/csv",
+  ods: "application/vnd.oasis.opendocument.spreadsheet",
+};
+
 type SupabaseConfig = { url: string; key: string };
 
 function supabaseConfig(): SupabaseConfig | null {
@@ -86,7 +97,7 @@ export async function saveUpload(
     method: "POST",
     headers: {
       Authorization: `Bearer ${config.key}`,
-      "Content-Type": "application/octet-stream",
+      "Content-Type": CONTENT_TYPES[extension.toLowerCase()] ?? "application/octet-stream",
       "x-upsert": "true",
     },
     body: toArrayBuffer(data),
