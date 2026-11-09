@@ -43,7 +43,7 @@ const result = computePayroll({
       mweStatus: "not_mwe",
     },
   ],
-  schedules: new Map([["s1", new Set([1, 2, 3, 4, 5])]]),
+  schedules: new Map([["s1", new Map([[1, 8], [2, 8], [3, 8], [4, 8], [5, 8]])]]),
   attendance: [
     "2026-10-26", "2026-10-27", "2026-10-28", "2026-10-29", "2026-10-30",
     "2026-11-02", "2026-11-03", "2026-11-04", "2026-11-05", "2026-11-06",
@@ -83,7 +83,7 @@ const cutoff2 = computePayroll({
       mweStatus: "not_mwe",
     },
   ],
-  schedules: new Map(),
+  schedules: new Map<string, Map<number, number>>(),
   attendance: [{ employeeId: "e1", workDate: "2026-11-16", hours: 8 }],
   buckets: [{ employeeId: "e1", code: "ROT", hours: 2 }],
 });
@@ -94,5 +94,51 @@ assert.equal(second.daysPaid, 1);
 assert.equal(second.overtime, 360.58); // 2h × 1153.8462/8 × 1.25
 assert.equal(second.allowance, 500);
 assert.ok(cutoff2.issues.some((issue) => issue.kind === "no_schedule"));
+
+// A four-hour day on an eight-hour schedule is half a day, not a full one.
+const fractional = computePayroll({
+  cutoffNo: 1,
+  divisor: 26,
+  employees: [
+    {
+      id: "e1",
+      employeeCode: "E1",
+      lastName: "Doe",
+      firstName: "Jane",
+      monthlyRate: 14820,
+      monthlyAllowance: 0,
+      scheduleId: "s1",
+      mweStatus: "not_mwe",
+    },
+  ],
+  schedules: new Map([["s1", new Map([[1, 8], [2, 8], [3, 8], [4, 8], [5, 8]])]]),
+  attendance: [{ employeeId: "e1", workDate: "2026-10-26", hours: 4 }],
+  buckets: [],
+});
+assert.equal(fractional.lines[0]?.daysPaid, 0.5, "4h is half a day");
+assert.equal(fractional.lines[0]?.basic, 285, "half day of 570");
+
+// Two minutes late prorates the day and the basic pay.
+const late = computePayroll({
+  cutoffNo: 1,
+  divisor: 26,
+  employees: [
+    {
+      id: "e1",
+      employeeCode: "E1",
+      lastName: "Doe",
+      firstName: "Jane",
+      monthlyRate: 14820,
+      monthlyAllowance: 0,
+      scheduleId: "s1",
+      mweStatus: "not_mwe",
+    },
+  ],
+  schedules: new Map([["s1", new Map([[1, 8], [2, 8], [3, 8], [4, 8], [5, 8]])]]),
+  attendance: [{ employeeId: "e1", workDate: "2026-10-26", hours: 8 - 2 / 60 }],
+  buckets: [],
+});
+assert.equal(late.lines[0]?.daysPaid, 0.9958, "2 minutes late prorates the day");
+assert.equal(late.lines[0]?.basic, 567.63, "2 minutes late reduces basic");
 
 console.log("payroll engine checks passed");
