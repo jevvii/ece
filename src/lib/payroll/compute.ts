@@ -1,12 +1,13 @@
 import {
   pagibigContribution,
   philhealthContribution,
-  premiumMatrix,
+  resolveStatutory,
   round2,
   round4,
   splitAcrossCutoffs,
   sssContribution,
   withholdingTax,
+  type StatutoryDataset,
 } from "./statutory";
 
 export type RunIssue = {
@@ -41,6 +42,9 @@ export type ComputeInput = {
   attendance: Array<{ employeeId: string; workDate: string; hours: number }>;
   buckets: Array<{ employeeId: string; code: string; hours: number }>;
   adjustments?: Array<{ employeeId: string; kind: "earning" | "deduction"; amount: number }>;
+  /** Rules effective on the period date; resolved from the registry when omitted. */
+  statutory?: StatutoryDataset;
+  periodDate?: string;
 };
 
 export type ComputedLine = {
@@ -84,6 +88,9 @@ const weekdayOf = (isoDate: string) => {
 
 export function computePayroll(input: ComputeInput): ComputeResult {
   const { cutoffNo, divisor, employees, schedules, attendance, buckets } = input;
+  const statutory =
+    input.statutory ??
+    resolveStatutory(input.periodDate ?? new Date().toISOString().slice(0, 10));
   const issues: RunIssue[] = [];
 
   const byEmployee = new Map<
@@ -174,7 +181,7 @@ export function computePayroll(input: ComputeInput): ComputeResult {
     const breakdown: ComputedLine["breakdown"] = [];
 
     for (const [code, hours] of entry.buckets) {
-      const rule = premiumMatrix[code];
+      const rule = statutory.premiumMatrix[code];
       if (!rule) {
         issues.push({
           employeeCode: employee.employeeCode,
@@ -222,9 +229,9 @@ export function computePayroll(input: ComputeInput): ComputeResult {
     const adjustmentEarning = round2(entry.adjustmentEarning);
     const gross = round2(basic + allowance + adjustmentEarning + overtime + nightDiff + holiday + premium);
 
-    const sssMonthly = sssContribution(employee.monthlyRate);
-    const phMonthly = philhealthContribution(employee.monthlyRate);
-    const piMonthly = pagibigContribution(employee.monthlyRate);
+    const sssMonthly = sssContribution(employee.monthlyRate, statutory);
+    const phMonthly = philhealthContribution(employee.monthlyRate, statutory);
+    const piMonthly = pagibigContribution(employee.monthlyRate, statutory);
 
     const sssEmployee = splitAcrossCutoffs(sssMonthly.employee, cutoffNo);
     const sssEmployer = splitAcrossCutoffs(sssMonthly.employer + sssMonthly.ec, cutoffNo);
@@ -238,7 +245,7 @@ export function computePayroll(input: ComputeInput): ComputeResult {
         ? 0
         : Math.max(0, round2(gross - sssEmployee - philhealthEmployee - pagibigEmployee));
 
-    const tax = withholdingTax(taxable);
+    const tax = withholdingTax(taxable, statutory);
     const otherDeductions = round2(entry.adjustmentDeduction);
     const netPay = round2(gross - sssEmployee - philhealthEmployee - pagibigEmployee - tax - otherDeductions);
     if (netPay < 0) {

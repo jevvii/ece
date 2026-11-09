@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import {
   pagibigContribution,
   philhealthContribution,
-  splitAcrossCutoffs,
+  resolveStatutory,
   sssContribution,
+  splitAcrossCutoffs,
   withholdingTax,
 } from "../src/lib/payroll/statutory";
 import { computePayroll } from "../src/lib/payroll/compute";
@@ -27,6 +28,13 @@ assert.equal(splitAcrossCutoffs(1500, 1), 750);
 assert.equal(splitAcrossCutoffs(1500, 2), 750);
 assert.equal(splitAcrossCutoffs(1234.57, 1), 617.29);
 assert.equal(splitAcrossCutoffs(1234.57, 2), 617.28);
+
+// Statutory rules resolve by effective date, and a supplied dataset is honoured.
+const dataset = resolveStatutory("2026-06-01");
+assert.equal(dataset.version, "PH-2026.1", "resolves the 2026 dataset");
+assert.equal(dataset.approved, false, "dataset is not approved for filing");
+const custom = { ...dataset, sss: { ...dataset.sss, employeeRate: 0.04 } };
+assert.equal(sssContribution(30000, custom).employee, 1200, "supplied dataset is used");
 
 const result = computePayroll({
   cutoffNo: 1,

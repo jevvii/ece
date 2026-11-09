@@ -79,7 +79,22 @@ export const taxBrackets = [
 
 export const thirteenthMonthCap = 90000;
 
-export type PremiumKind = "overtime" | "restday" | "holiday" | "nightdiff";
+/**
+ * A whole statutory rule set, effective from a date. Add a new entry when a
+ * circular changes a rate; payroll resolves the dataset from the period date,
+ * so old runs keep the rules they were computed under.
+ */
+export type StatutoryDataset = {
+  version: string;
+  approved: boolean;
+  effectiveFrom: string;
+  sss: Record<keyof typeof sss, number>;
+  philhealth: Record<keyof typeof philhealth, number>;
+  pagibig: Record<keyof typeof pagibig, number>;
+  taxBrackets: ReadonlyArray<{ over: number; base: number; rate: number }>;
+  premiumMatrix: Record<string, { rate: number; kind: PremiumKind; label: string }>;
+  thirteenthMonthCap: number;
+};
 
 export const premiumMatrix: Record<string, { rate: number; kind: PremiumKind; label: string }> = {
   ROT: { rate: 1.25, kind: "overtime", label: "Regular overtime" },
@@ -101,43 +116,81 @@ export const premiumMatrix: Record<string, { rate: number; kind: PremiumKind; la
   ND: { rate: 0.1, kind: "nightdiff", label: "Night differential (premium only)" },
 };
 
+export const statutoryDatasets: Record<string, StatutoryDataset> = {
+  "PH-2026.1": {
+    version: STATUTORY_VERSION,
+    approved: STATUTORY_APPROVED,
+    effectiveFrom: "2026-01-01",
+    sss,
+    philhealth,
+    pagibig,
+    taxBrackets,
+    premiumMatrix,
+    thirteenthMonthCap,
+  },
+};
+
+export function resolveStatutory(effectiveDate: string): StatutoryDataset {
+  const candidates = Object.values(statutoryDatasets)
+    .filter((dataset) => dataset.effectiveFrom <= effectiveDate)
+    .sort((a, b) => b.effectiveFrom.localeCompare(a.effectiveFrom));
+  return candidates[0] ?? statutoryDatasets["PH-2026.1"]!;
+}
+
+export type PremiumKind = "overtime" | "restday" | "holiday" | "nightdiff";
+
 export const round2 = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 export const round4 = (value: number) => Math.round((value + Number.EPSILON) * 10000) / 10000;
 
-export function sssContribution(monthlyBasic: number) {
+export function sssContribution(
+  monthlyBasic: number,
+  dataset: StatutoryDataset = statutoryDatasets["PH-2026.1"]!,
+) {
+  const rules = dataset.sss;
   const msc = Math.min(
-    sss.mscCeiling,
-    Math.max(sss.mscFloor, Math.round(monthlyBasic / 500) * 500),
+    rules.mscCeiling,
+    Math.max(rules.mscFloor, Math.round(monthlyBasic / 500) * 500),
   );
   return {
     msc,
-    employee: round2(msc * sss.employeeRate),
-    employer: round2(msc * sss.employerRate),
-    ec: msc <= sss.ecThreshold ? sss.ecLow : sss.ecHigh,
+    employee: round2(msc * rules.employeeRate),
+    employer: round2(msc * rules.employerRate),
+    ec: msc <= rules.ecThreshold ? rules.ecLow : rules.ecHigh,
   };
 }
 
-export function philhealthContribution(monthlyBasic: number) {
-  const base = Math.min(philhealth.ceiling, Math.max(philhealth.floor, monthlyBasic));
-  const premium = round2(base * philhealth.rate);
-  const employee = round2(premium * philhealth.employeeShare);
+export function philhealthContribution(
+  monthlyBasic: number,
+  dataset: StatutoryDataset = statutoryDatasets["PH-2026.1"]!,
+) {
+  const rules = dataset.philhealth;
+  const base = Math.min(rules.ceiling, Math.max(rules.floor, monthlyBasic));
+  const premium = round2(base * rules.rate);
+  const employee = round2(premium * rules.employeeShare);
   return { base, employee, employer: round2(premium - employee) };
 }
 
-export function pagibigContribution(monthlyBasic: number) {
-  const fundSalary = Math.min(pagibig.fundSalaryCap, Math.max(0, monthlyBasic));
-  const employeeRate = fundSalary <= pagibig.lowThreshold ? pagibig.employeeRateLow : pagibig.employeeRate;
+export function pagibigContribution(
+  monthlyBasic: number,
+  dataset: StatutoryDataset = statutoryDatasets["PH-2026.1"]!,
+) {
+  const rules = dataset.pagibig;
+  const fundSalary = Math.min(rules.fundSalaryCap, Math.max(0, monthlyBasic));
+  const employeeRate = fundSalary <= rules.lowThreshold ? rules.employeeRateLow : rules.employeeRate;
   return {
     fundSalary,
     employee: round2(fundSalary * employeeRate),
-    employer: round2(fundSalary * pagibig.employerRate),
+    employer: round2(fundSalary * rules.employerRate),
   };
 }
 
-export function withholdingTax(taxableSemiMonthly: number) {
+export function withholdingTax(
+  taxableSemiMonthly: number,
+  dataset: StatutoryDataset = statutoryDatasets["PH-2026.1"]!,
+) {
   if (taxableSemiMonthly <= 0) return 0;
-  let bracket: (typeof taxBrackets)[number] = taxBrackets[0];
-  for (const candidate of taxBrackets) {
+  let bracket = dataset.taxBrackets[0]!;
+  for (const candidate of dataset.taxBrackets) {
     if (taxableSemiMonthly > candidate.over) bracket = candidate;
   }
   return round2(bracket.base + (taxableSemiMonthly - bracket.over) * bracket.rate);

@@ -126,6 +126,7 @@ export async function calculateRun(formData: FormData) {
   const result = computePayroll({
     cutoffNo: periodRow.period.cutoffNo,
     divisor: tenant.salaryDivisor,
+    periodDate: periodRow.period.coverageStart,
     employees: employeeRows.map((employee) => ({
       id: employee.id,
       employeeCode: employee.employeeCode,
