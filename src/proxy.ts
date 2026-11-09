@@ -22,7 +22,9 @@ export function proxy(request: NextRequest) {
 
 export const config = {
   // `api/health` must stay public: Render probes it before traffic is routed.
+  // All of `_next` is excluded — that includes `_next/hmr`, the Turbopack dev
+  // websocket. Running it through the proxy breaks the handshake.
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|api/health|.*\\.(?:svg|png|jpg|jpeg|gif|webp|woff2)$).*)",
+    "/((?!_next|favicon.ico|api/health|.*\\.(?:svg|png|jpg|jpeg|gif|webp|woff2)$).*)",
   ],
 };

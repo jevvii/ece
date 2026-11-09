@@ -113,20 +113,7 @@ export function EmployeesStage({
         </div>
       ) : null}
 
-      <form action={action} className="mt-6">
-        <input type="hidden" name="from" value={from} />
-        <input type="hidden" name="step" value={step} />
-        <input
-          type="hidden"
-          name="rows"
-          value={JSON.stringify(
-            rows.map((row) => ({
-              ...row,
-              monthlyRate: Number(row.monthlyRate || 0),
-            })),
-          )}
-        />
-
+      <div className="mt-6">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <h3 className="text-[12.5px] font-semibold uppercase tracking-[0.08em]">
             Add employees
@@ -171,6 +158,22 @@ export function EmployeesStage({
             Preview rows
           </button>
         </details>
+
+        {/* The import panel above owns its own <form>; nesting forms is invalid HTML
+            and makes React fail hydration, so the save form starts here. */}
+        <form action={action} className="mt-4">
+          <input type="hidden" name="from" value={from} />
+          <input type="hidden" name="step" value={step} />
+          <input
+            type="hidden"
+            name="rows"
+            value={JSON.stringify(
+              rows.map((row) => ({
+                ...row,
+                monthlyRate: Number(row.monthlyRate || 0),
+              })),
+            )}
+          />
 
         {rows.length > 0 ? (
           <div className="scroll-x mt-4 rounded-[14px] border border-rule">
@@ -268,7 +271,8 @@ export function EmployeesStage({
             Save {rows.length > 0 ? `${rows.length} ` : ""}employee{rows.length === 1 ? "" : "s"}
           </button>
         </div>
-      </form>
+        </form>
+      </div>
     </div>
   );
 }

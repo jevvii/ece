@@ -15,7 +15,8 @@
     "db:seed": "tsx src/db/seed.ts",
     "db:reset": "tsx src/db/seed.ts --reset",
     "check:import": "tsx scripts/check-import.ts",
-    "check:payroll": "tsx scripts/check-payroll.ts"
+    "check:payroll": "tsx scripts/check-payroll.ts",
+    "check:browser": "node scripts/check-browser.mjs"
   },
   "dependencies": {
     "drizzle-orm": "^0.45.4",
