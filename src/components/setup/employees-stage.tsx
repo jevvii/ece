@@ -5,7 +5,7 @@ import { EmployeeImport } from "./employee-import";
 import {
   blankDraft,
   parsePasteRows,
-  rowProblem,
+  rowIssues,
   type EmployeeDraft,
 } from "./employee-row";
 
@@ -28,6 +28,7 @@ type Existing = {
 
 const input =
   "h-9 w-full rounded-[10px] border border-rule-strong bg-surface px-2 text-[12.5px] outline-none focus:border-accent focus:ring-2 focus:ring-accent/15";
+const invalidInput = "border-[#9f2f2d] bg-[#fdebec]/60 ring-2 ring-[#9f2f2d]/10";
 
 const peso = new Intl.NumberFormat("en-PH", {
   style: "currency",
@@ -56,8 +57,12 @@ export function EmployeesStage({
   const [paste, setPaste] = useState("");
   const [pasteError, setPasteError] = useState<string | null>(null);
 
-  const problems = useMemo(() => rows.map(rowProblem), [rows]);
-  const blocked = problems.some(Boolean);
+  const issues = useMemo(() => rows.map(rowIssues), [rows]);
+  const blocked = issues.some((row) => row.length > 0);
+  const firstProblem = issues.find((row) => row.length > 0)?.[0]?.message ?? null;
+  const rowInvalid = (index: number) => (issues[index] ?? []).length > 0;
+  const hasIssue = (index: number, field: string) =>
+    (issues[index] ?? []).some((issue) => issue.field === field);
 
   function update(index: number, key: keyof EmployeeDraft, value: string) {
     setRows((current) =>
@@ -177,30 +182,45 @@ export function EmployeesStage({
 
         {rows.length > 0 ? (
           <div className="scroll-x mt-4 rounded-[14px] border border-rule">
-            <table className="w-full min-w-[900px] border-collapse text-left">
+            <table className="w-full min-w-[1680px] border-collapse text-left">
               <thead>
                 <tr className="border-b border-rule">
-                  {["Code", "Employee name", "TIN", "Birthday", "Address", "Hired", "Terminated", "Rate", "Rank", "Schedule", ""].map(
-                    (heading, index) => (
-                      <th
-                        key={`${heading}-${index}`}
-                        scope="col"
-                        className="px-2 py-2 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-muted"
-                      >
-                        {heading}
-                      </th>
-                    ),
-                  )}
+                  {[
+                    { label: "Code", width: "min-w-[110px]" },
+                    { label: "Employee name", width: "min-w-[230px]" },
+                    { label: "TIN", width: "min-w-[150px]" },
+                    { label: "Birthday", width: "min-w-[150px]" },
+                    { label: "Address", width: "min-w-[280px]" },
+                    { label: "Hired", width: "min-w-[150px]" },
+                    { label: "Terminated", width: "min-w-[150px]" },
+                    { label: "Rate", width: "min-w-[130px]" },
+                    { label: "Rank", width: "min-w-[150px]" },
+                    { label: "Schedule", width: "min-w-[210px]" },
+                    { label: "", width: "min-w-[80px]" },
+                  ].map((column) => (
+                    <th
+                      key={column.label}
+                      scope="col"
+                      className={`px-2 py-2 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-muted ${column.width}`}
+                    >
+                      {column.label}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
                 {rows.map((row, index) => (
-                  <tr key={index} className="border-b border-rule last:border-b-0">
+                  <tr
+                    key={index}
+                    className={`border-b border-rule last:border-b-0 ${
+                      rowInvalid(index) ? "bg-[#fdebec]/40" : ""
+                    }`}
+                  >
                     <td className="px-2 py-1.5">
-                      <input aria-label={`Code row ${index + 1}`} value={row.employeeCode} onChange={(event) => update(index, "employeeCode", event.target.value)} className={input} />
+                      <input aria-label={`Code row ${index + 1}`} value={row.employeeCode} onChange={(event) => update(index, "employeeCode", event.target.value)} aria-invalid={hasIssue(index, "employeeCode") || undefined} className={`${input} ${hasIssue(index, "employeeCode") ? invalidInput : ""}`} />
                     </td>
                     <td className="px-2 py-1.5">
-                      <input aria-label={`Name row ${index + 1}`} value={row.employeeName} placeholder="Dela Cruz, Maria" onChange={(event) => update(index, "employeeName", event.target.value)} className={input} />
+                      <input aria-label={`Name row ${index + 1}`} value={row.employeeName} placeholder="Dela Cruz, Maria" onChange={(event) => update(index, "employeeName", event.target.value)} aria-invalid={hasIssue(index, "employeeName") || undefined} className={`${input} ${hasIssue(index, "employeeName") ? invalidInput : ""}`} />
                     </td>
                     <td className="px-2 py-1.5">
                       <input aria-label={`TIN row ${index + 1}`} value={row.tin} onChange={(event) => update(index, "tin", event.target.value)} className={input} />
@@ -212,13 +232,13 @@ export function EmployeesStage({
                       <input aria-label={`Address row ${index + 1}`} value={row.address} onChange={(event) => update(index, "address", event.target.value)} className={input} />
                     </td>
                     <td className="px-2 py-1.5">
-                      <input aria-label={`Hire date row ${index + 1}`} type="date" value={row.hireDate} onChange={(event) => update(index, "hireDate", event.target.value)} className={input} />
+                      <input aria-label={`Hire date row ${index + 1}`} type="date" value={row.hireDate} onChange={(event) => update(index, "hireDate", event.target.value)} aria-invalid={hasIssue(index, "hireDate") || undefined} className={`${input} ${hasIssue(index, "hireDate") ? invalidInput : ""}`} />
                     </td>
                     <td className="px-2 py-1.5">
                       <input aria-label={`Termination date row ${index + 1}`} type="date" value={row.separationDate} onChange={(event) => update(index, "separationDate", event.target.value)} className={input} />
                     </td>
                     <td className="px-2 py-1.5">
-                      <input aria-label={`Monthly rate row ${index + 1}`} type="number" min={0} step="0.01" value={row.monthlyRate} onChange={(event) => update(index, "monthlyRate", event.target.value)} className={`${input} tabular-nums`} />
+                      <input aria-label={`Monthly rate row ${index + 1}`} type="number" min={0} step="0.01" value={row.monthlyRate} onChange={(event) => update(index, "monthlyRate", event.target.value)} aria-invalid={hasIssue(index, "monthlyRate") || undefined} className={`${input} tabular-nums ${hasIssue(index, "monthlyRate") ? invalidInput : ""}`} />
                     </td>
                     <td className="px-2 py-1.5">
                       <select aria-label={`Rank row ${index + 1}`} value={row.rankId} onChange={(event) => update(index, "rankId", event.target.value)} className={input}>
@@ -237,14 +257,26 @@ export function EmployeesStage({
                       </select>
                     </td>
                     <td className="px-2 py-1.5">
-                      <button
-                        type="button"
-                        aria-label={`Remove row ${index + 1}`}
-                        onClick={() => setRows((current) => current.filter((_, position) => position !== index))}
-                        className="h-8 rounded-full border border-rule-strong px-3 text-[12px] text-muted hover:bg-surface-2"
-                      >
-                        ×
-                      </button>
+                      <div className="flex items-center gap-1">
+                        {rowInvalid(index) ? (
+                          <span
+                            role="img"
+                            aria-label={`Row ${index + 1} has errors`}
+                            title={(issues[index] ?? []).map((issue) => issue.message).join("; ")}
+                            className="figure flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#fdebec] text-[12px] font-bold text-[#9f2f2d]"
+                          >
+                            !
+                          </span>
+                        ) : null}
+                        <button
+                          type="button"
+                          aria-label={`Remove row ${index + 1}`}
+                          onClick={() => setRows((current) => current.filter((_, position) => position !== index))}
+                          className="h-8 rounded-full border border-rule-strong px-3 text-[12px] text-muted hover:bg-surface-2"
+                        >
+                          ×
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -255,7 +287,7 @@ export function EmployeesStage({
 
         {rows.length > 0 && blocked ? (
           <p className="mt-3 text-[12px] text-[#7c2523]">
-            {problems.find(Boolean)}. Fix the highlighted rows before saving.
+            {firstProblem}. Fix the highlighted rows before saving.
           </p>
         ) : null}
 

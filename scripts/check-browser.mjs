@@ -138,6 +138,34 @@ try {
     throw new Error(`Expected the preview to start with EMP-1001, received "${firstCode}"`);
   }
 
+  // Error highlighting: clearing a required date must mark the field and block saving.
+  const hire = page.getByLabel("Hire date row 1");
+  await hire.fill("");
+  await page.waitForTimeout(150);
+  if ((await hire.getAttribute("aria-invalid")) !== "true") {
+    throw new Error("Clearing a hire date did not mark the field invalid");
+  }
+  const saveButton = page.getByRole("button", { name: /Save 3 employees/ });
+  if (!(await saveButton.isDisabled())) {
+    throw new Error("Save stayed enabled while a row was invalid");
+  }
+  await hire.fill("2026-01-05");
+  await page.waitForTimeout(150);
+  if ((await hire.getAttribute("aria-invalid")) !== null) {
+    throw new Error("Field stayed invalid after it was corrected");
+  }
+  if (await saveButton.isDisabled()) {
+    throw new Error("Save stayed disabled after the row was corrected");
+  }
+
+  // Columns must be readable; the table scrolls, so there is no reason to squeeze.
+  const codeBox = await page.getByLabel("Code row 1").boundingBox();
+  const nameBox = await page.getByLabel("Name row 1").boundingBox();
+  const addressBox = await page.getByLabel("Address row 1").boundingBox();
+  if (!codeBox || codeBox.width < 90) throw new Error(`Code column too narrow: ${codeBox?.width}px`);
+  if (!nameBox || nameBox.width < 170) throw new Error(`Name column too narrow: ${nameBox?.width}px`);
+  if (!addressBox || addressBox.width < 200) throw new Error(`Address column too narrow: ${addressBox?.width}px`);
+
   currentRoute = "done";
 } catch (error) {
   record("script", error instanceof Error ? error.message : String(error));

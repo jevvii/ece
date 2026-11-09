@@ -91,12 +91,24 @@ export function normaliseRate(value: string) {
   return value.replace(/[₱$,\s]/g, "");
 }
 
+export type EmployeeIssueField = "employeeCode" | "employeeName" | "hireDate" | "monthlyRate";
+export type EmployeeIssue = { field: EmployeeIssueField; message: string };
+
+export function rowIssues(row: EmployeeDraft): EmployeeIssue[] {
+  const issues: EmployeeIssue[] = [];
+  if (!row.employeeCode.trim()) issues.push({ field: "employeeCode", message: "Code missing" });
+  if (!row.employeeName.includes(",")) {
+    issues.push({ field: "employeeName", message: "Name must be \"Last, First\"" });
+  }
+  if (!row.hireDate) issues.push({ field: "hireDate", message: "Hire date missing" });
+  if (!row.monthlyRate || Number.isNaN(Number(row.monthlyRate))) {
+    issues.push({ field: "monthlyRate", message: "Rate missing" });
+  }
+  return issues;
+}
+
 export function rowProblem(row: EmployeeDraft) {
-  if (!row.employeeCode.trim()) return "Code missing";
-  if (!row.employeeName.includes(",")) return "Name must be \"Last, First\"";
-  if (!row.hireDate) return "Hire date missing";
-  if (!row.monthlyRate || Number.isNaN(Number(row.monthlyRate))) return "Rate missing";
-  return null;
+  return rowIssues(row)[0]?.message ?? null;
 }
 
 const PASTE_HEADERS: Record<string, keyof EmployeeDraft> = {
