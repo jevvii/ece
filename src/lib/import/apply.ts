@@ -64,7 +64,10 @@ export function applyMapping(input: ApplyInput): ApplyOutput {
 
   const issues: ImportIssue[] = [];
   const days: ApplyOutput["days"] = [];
-  const buckets: ApplyOutput["buckets"] = [];
+  // A premium code can appear in more than one source column (the client export
+  // repeats SH, RH and Sun headers). attendance_buckets is unique on
+  // (run, employee, code), so accumulate totals instead of pushing per column.
+  const bucketTotals = new Map<string, { employeeId: string; code: string; hours: number }>();
   const unknown = new Set<string>();
   const seen = new Set<string>();
 
@@ -181,17 +184,19 @@ export function applyMapping(input: ApplyInput): ApplyOutput {
       if (!cell || cell.value === null || cell.value <= 0) continue;
 
       const hours = toHours(cell.value, column.unit ?? "hours");
-      buckets.push({
-        employeeId,
-        code: column.code!,
-        hours: Math.round(hours * 100) / 100,
-      });
+      const key = `${employeeId}|${column.code}`;
+      const existing = bucketTotals.get(key);
+      if (existing) existing.hours += hours;
+      else bucketTotals.set(key, { employeeId, code: column.code!, hours });
     }
   }
 
   return {
     days,
-    buckets,
+    buckets: [...bucketTotals.values()].map((bucket) => ({
+      ...bucket,
+      hours: Math.round(bucket.hours * 100) / 100,
+    })),
     issues,
     unknownCodes: [...unknown].sort(),
     matchedEmployees,
