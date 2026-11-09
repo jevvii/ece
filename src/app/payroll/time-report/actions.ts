@@ -71,6 +71,7 @@ export async function uploadTimeReport(formData: FormData) {
   }
 
   const bytes = new Uint8Array(await file.arrayBuffer());
+  const detectStartedAt = Date.now();
 
   let sheet;
   try {
@@ -88,6 +89,8 @@ export async function uploadTimeReport(formData: FormData) {
     redirect(`/payroll/time-report?error=${encodeURIComponent(message)}`);
   }
 
+  const detectMs = Date.now() - detectStartedAt;
+
   const runId = crypto.randomUUID();
   const storageKey = await saveUpload(tenant.id, runId, extension, bytes);
 
@@ -104,7 +107,7 @@ export async function uploadTimeReport(formData: FormData) {
     createdBy: user.id,
   });
 
-  redirect(`/payroll/time-report/${runId}?new=1`);
+  redirect(`/payroll/time-report/${runId}?new=1&ms=${detectMs}`);
 }
 
 export async function confirmImport(formData: FormData) {

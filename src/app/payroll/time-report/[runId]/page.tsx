@@ -54,10 +54,10 @@ export default async function TimeReportRunPage({
   searchParams,
 }: {
   params: Promise<{ runId: string }>;
-  searchParams: Promise<{ error?: string; new?: string }>;
+  searchParams: Promise<{ error?: string; new?: string; ms?: string }>;
 }) {
   const { runId } = await params;
-  const { error, new: isNew } = await searchParams;
+  const { error, new: isNew, ms } = await searchParams;
   const { tenant } = await requireWorkspace();
 
   const [run] = await db
@@ -158,6 +158,7 @@ export default async function TimeReportRunPage({
             : "No cutoff attached"
         }
         isNew={isNew === "1"}
+        detectMs={Number(ms ?? 0) || 0}
         error={error ? decodeURIComponent(error) : undefined}
       />
     );

@@ -65,6 +65,7 @@ export function MappingGrid({
   fileName,
   periodLabel,
   isNew,
+  detectMs,
   error,
 }: {
   runId: string;
@@ -78,9 +79,12 @@ export function MappingGrid({
   fileName: string;
   periodLabel: string;
   isNew: boolean;
+  detectMs: number;
   error?: string;
 }) {
+  const bootMs = Math.max(350, Math.min(2000, detectMs || 700));
   const [booting, setBooting] = useState(isNew);
+  const [premiumOpen, setPremiumOpen] = useState(false);
   const [selection, setSelection] = useState<Selection | null>(null);
   const [dragging, setDragging] = useState(false);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
@@ -102,10 +106,10 @@ export function MappingGrid({
 
   useEffect(() => {
     if (!isNew) return;
-    const timer = window.setTimeout(() => setBooting(false), 700);
+    const timer = window.setTimeout(() => setBooting(false), bootMs);
     window.history.replaceState(null, "", window.location.pathname);
     return () => window.clearTimeout(timer);
-  }, [isNew]);
+  }, [isNew, bootMs]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -134,9 +138,10 @@ export function MappingGrid({
 
   function openMenuAt(x: number, y: number) {
     if (typeof window === "undefined") return;
+    setPremiumOpen(false);
     setMenu({
       x: Math.max(8, Math.min(x, window.innerWidth - 300)),
-      y: Math.max(8, Math.min(y + 10, window.innerHeight - 380)),
+      y: Math.max(8, Math.min(y + 10, window.innerHeight - 420)),
     });
   }
 
@@ -231,21 +236,24 @@ export function MappingGrid({
   }
 
   const targets = useMemo(() => {
-    if (!selection) return [];
-    if (selection.kind === "row") return [{ key: "data", label: "First data row" }];
+    if (!selection) return [] as Array<{ key: string; label: string; chip: string | null }>;
+    if (selection.kind === "row") return [{ key: "data", label: "First data row", chip: null }];
     const many = selection.start !== selection.end;
     return [
-      { key: "days", label: many ? "Day / date range" : "Day column" },
-      ...premiumCodes.map((code) => ({ key: `bucket:${code}`, label: code })),
+      {
+        key: "days",
+        label: many ? "Date range" : "Date column",
+        chip: mode === "late" ? "Late" : "Day",
+      },
       ...(many
         ? []
         : [
-            { key: "code", label: "Employee code" },
-            { key: "name", label: "Employee name" },
-            { key: "late", label: "Period late total" },
+            { key: "code", label: "Employee code", chip: null },
+            { key: "name", label: "Employee name", chip: null },
+            { key: "late", label: "Period late total", chip: null },
           ]),
     ];
-  }, [selection]);
+  }, [selection, mode]);
 
   const chips: Array<{ id: string; label: string; detail: string; clear: () => void }> = [];
   if (assign.code != null) {
@@ -347,11 +355,11 @@ export function MappingGrid({
             <span className="h-2 w-2 rounded-full bg-accent" aria-hidden="true" />
             ECE
           </span>
-          <p className="mt-8 text-[11.5px] font-semibold uppercase tracking-[0.12em] text-muted">Reading sheet</p>
+          <p className="mt-8 text-[11.5px] font-semibold uppercase tracking-[0.12em] text-muted">Step 1 of 3 · Detect</p>
           <h2 className="mt-3 max-w-[80vw] truncate font-serif text-[clamp(1.8rem,4vw,2.6rem)] tracking-[-0.02em]">{fileName}</h2>
           <p className="mt-2 text-[13px] text-ink-2">{rowCount} rows · {colCount} columns</p>
           <div className="mt-8 h-[2px] w-[240px] overflow-hidden rounded-full bg-rule">
-            <div className="h-full rounded-full bg-accent" style={{ animation: "boot-line 700ms cubic-bezier(0.16,1,0.3,1) forwards" }} />
+            <div className="h-full rounded-full bg-accent" style={{ animation: `boot-line ${bootMs}ms cubic-bezier(0.16,1,0.3,1) forwards` }} />
           </div>
         </div>
       ) : null}
@@ -393,6 +401,18 @@ export function MappingGrid({
         </div>
       </header>
 
+      <div className="flex shrink-0 items-center gap-3 border-b border-rule px-4 py-2">
+        <div className="h-[2px] flex-1 overflow-hidden rounded-full bg-rule">
+          <div
+            className="h-full rounded-full bg-accent transition-[width] duration-300"
+            style={{ width: `${((booting ? 1 : reviewOpen ? 3 : 2) / 3) * 100}%` }}
+          />
+        </div>
+        <span className="shrink-0 text-[11.5px] text-muted">
+          Step {booting ? 1 : reviewOpen ? 3 : 2} of 3 · {booting ? "Detect" : reviewOpen ? "Review" : "Map"}
+        </span>
+      </div>
+
       {error ? (
         <div role="alert" className="shrink-0 border-b border-[#9f2f2d]/25 bg-[#fdebec] px-4 py-2 text-[12px] text-[#7c2523]">
           {error}
@@ -424,6 +444,13 @@ export function MappingGrid({
         {reviewOpen ? (
           <div className="panel-in min-h-0 flex-1 overflow-auto px-6 py-8">
             <div className="mx-auto w-full max-w-[920px]">
+              <button
+                type="button"
+                onClick={() => setReviewOpen(false)}
+                className="mb-5 flex items-center gap-2 text-[12.5px] text-muted transition-colors duration-150 hover:text-ink"
+              >
+                ← Back to grid
+              </button>
               <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">Review mapping</p>
               <h1 className="mt-3 font-serif text-[clamp(2rem,4vw,2.8rem)] leading-[1.05] tracking-[-0.03em]">
                 {detected.sheetName}
@@ -581,9 +608,17 @@ export function MappingGrid({
                     {visible.map((rowIndex) => {
                       const row = grid[rowIndex] ?? [];
                       const isHeader = rowIndex < dataStart;
+                      const beforeHeader = rowIndex < detected.headerRow;
+                      const isHeaderRow = rowIndex === detected.headerRow;
                       const rowSelected = selection?.kind === "row" && selection.start === rowIndex;
                       return (
-                        <tr key={rowIndex} className={isHeader ? "text-muted" : "text-ink"} style={{ height: ROW_HEIGHT }}>
+                        <tr
+                          key={rowIndex}
+                          className={`${beforeHeader ? "text-muted opacity-50" : isHeader ? "text-muted" : "text-ink"} ${
+                            isHeaderRow ? "shadow-[inset_0_2px_0_#0c7a43]" : ""
+                          }`}
+                          style={{ height: ROW_HEIGHT }}
+                        >
                           <td
                             onMouseDown={(event) => {
                               pointer.current = { x: event.clientX, y: event.clientY };
@@ -639,7 +674,7 @@ export function MappingGrid({
                 </button>
               ))}
               <span className="ml-auto text-[11px] text-muted">
-                {rowCount} rows · {colCount} columns · data starts at row {dataStart + 1} · click a letter, drag across headers or cells
+                {rowCount} rows · {colCount} columns · header detected at row {detected.headerRow + 1} · row numbers set the data start
               </span>
             </div>
           </div>
@@ -658,21 +693,64 @@ export function MappingGrid({
                   : `Columns ${colLetter(Math.min(selection.start, selection.end))}–${colLetter(Math.max(selection.start, selection.end))}`}
             </p>
             <div className="mt-2 grid gap-1">
-              {targets.map((target) => {
-                const family = target.key.startsWith("bucket:") ? "bucket" : target.key;
-                return (
-                  <button
-                    key={target.key}
-                    type="button"
-                    onClick={() => assignTarget(target.key)}
-                    className="flex items-center gap-2 rounded-[8px] px-2 py-1.5 text-left text-[12px] transition-colors duration-150 hover:bg-surface-2"
-                  >
-                    <span className={`h-2 w-2 rounded-full ${tintDot[family] ?? "bg-muted"}`} aria-hidden="true" />
-                    {target.label}
-                  </button>
-                );
-              })}
+              {targets.map((target) => (
+                <button
+                  key={target.key}
+                  type="button"
+                  onClick={() => assignTarget(target.key)}
+                  className="flex items-center gap-2 rounded-[8px] px-2 py-1.5 text-left text-[12px] transition-colors duration-150 hover:bg-surface-2"
+                >
+                  <span className={`h-2 w-2 rounded-full ${tintDot[target.key] ?? "bg-muted"}`} aria-hidden="true" />
+                  {target.label}
+                  {target.chip ? (
+                    <span className="rounded-full bg-surface-2 px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-[0.06em] text-muted">
+                      {target.chip}
+                    </span>
+                  ) : null}
+                </button>
+              ))}
             </div>
+
+            {Object.keys(assign.buckets).length > 0 ? (
+              <div className="mt-2 border-t border-rule pt-2">
+                <p className="text-[9.5px] font-semibold uppercase tracking-[0.08em] text-muted">Assigned premium</p>
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {Object.entries(assign.buckets).map(([code, indexes]) => (
+                    <span key={code} className="flex items-center gap-1 rounded-full bg-[#a4552f]/12 px-2 py-0.5 text-[10.5px] font-semibold">
+                      <span className="h-1.5 w-1.5 rounded-full bg-[#a4552f]" aria-hidden="true" />
+                      {code}
+                      <span className="figure font-normal text-muted">{indexes.map(colLetter).join(",")}</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            <button
+              type="button"
+              onClick={() => setPremiumOpen((current) => !current)}
+              className="mt-2 flex w-full items-center justify-between rounded-[8px] px-2 py-1.5 text-left text-[12px] font-semibold transition-colors duration-150 hover:bg-surface-2"
+            >
+              <span className="flex items-center gap-2">
+                <span className="h-2 w-2 rounded-full bg-[#a4552f]" aria-hidden="true" />
+                Premium codes ({premiumCodes.length})
+              </span>
+              <span aria-hidden="true">{premiumOpen ? "▾" : "▸"}</span>
+            </button>
+            {premiumOpen ? (
+              <div className="mt-1 grid grid-cols-3 gap-1">
+                {premiumCodes.map((code) => (
+                  <button
+                    key={code}
+                    type="button"
+                    onClick={() => assignTarget(`bucket:${code}`)}
+                    className="rounded-[8px] border border-rule px-2 py-1 text-[10.5px] font-semibold transition-colors duration-150 hover:border-accent hover:text-accent"
+                  >
+                    {code}
+                  </button>
+                ))}
+              </div>
+            ) : null}
             <button type="button" onClick={() => { setMenu(null); setSelection(null); }} className="mt-2 w-full rounded-[8px] px-2 py-1.5 text-left text-[11px] text-muted hover:bg-surface-2">
               Clear selection
             </button>
