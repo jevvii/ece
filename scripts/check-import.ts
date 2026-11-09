@@ -2,23 +2,56 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { parseCsv } from "../src/lib/import/csv";
 import { parseOds } from "../src/lib/import/ods";
-import { detectMapping } from "../src/lib/import/detect";
-import { applyMapping } from "../src/lib/import/apply";
-import type { DetectedMapping } from "../src/lib/import/types";
+import {
+  applyMappingV2,
+  detectMappingV2,
+  validateMappingV2,
+  type MappingV2,
+} from "../src/lib/import/mapping-v2";
+import type { Sheet } from "../src/lib/import/types";
 
+const cell = (text: string) => ({
+  text,
+  value: /^-?\d+(\.\d+)?$/.test(text) ? Number(text) : null,
+});
+
+const weekdayOf = (date: string) => ((new Date(`${date}T00:00:00Z`).getUTCDay() + 6) % 7) + 1;
+
+const employee = { id: "e1", employeeCode: "E1", lastName: "Doe", firstName: "Jane" };
+const period = { coverageStart: "2026-10-26", coverageEnd: "2026-10-28" };
+
+function baseMapping(overrides: Partial<MappingV2>): MappingV2 {
+  return {
+    version: 2,
+    sheetName: "test",
+    mode: "days",
+    headerRow: 0,
+    dataStartRow: 1,
+    employeeCode: 0,
+    employeeName: null,
+    dayStart: null,
+    dayEnd: null,
+    dayUnits: {},
+    buckets: {},
+    periodLate: null,
+    ignored: [],
+    signature: "test",
+    notes: [],
+    ...overrides,
+  };
+}
+
+/* CSV fixture: day hours, 48 day records, unique buckets. */
 const csv = parseCsv(readFileSync("fixtures/sample-attendance.csv", "utf8"));
-const csvMap = detectMapping(csv);
+const csvMapping = detectMappingV2(csv);
+assert.equal(csvMapping.mode, "days", "CSV mode");
+assert.equal(csvMapping.employeeCode, 0, "CSV code column");
+assert.equal(csvMapping.dayStart, 2, "CSV first day column");
+assert.equal(csvMapping.dayEnd, 17, "CSV last day column");
 
-assert.equal(csvMap.headerRow, 0, "CSV header row");
-assert.equal(csvMap.dataStartRow, 1, "CSV data start");
-assert.equal(csvMap.columns.filter((column) => column.role === "day").length, 16, "CSV day columns");
-assert.equal(csvMap.columns.find((column) => column.role === "employee_code")?.index, 0, "CSV code column");
-assert.equal(csvMap.suggestedUnit, "hours", "CSV unit");
-
-const csvResult = applyMapping({
+const csvResult = applyMappingV2({
   sheet: csv,
-  mapping: csvMap,
-  dayUnit: "hours",
+  mapping: csvMapping,
   period: { coverageStart: "2026-10-26", coverageEnd: "2026-11-10" },
   employees: [
     { id: "e1", employeeCode: "BAY-0001", lastName: "Santos", firstName: "Maria" },
@@ -26,95 +59,121 @@ const csvResult = applyMapping({
     { id: "e3", employeeCode: "BAY-0003", lastName: "Cruz", firstName: "Ana" },
   ],
   externalIds: [],
+  schedules: {},
 });
 
 assert.equal(csvResult.matchedEmployees, 3, "CSV matched employees");
 assert.equal(csvResult.days.length, 48, "CSV day records");
 assert.equal(csvResult.unknownCodes.length, 0, "CSV no unknown codes");
-assert.equal(csvResult.days.filter((day) => day.hours > 24).length, 0, "CSV sane hours");
+assert.ok(csvResult.days.every((day) => day.lateMinutes === 0), "CSV has no lateness");
+const csvKeys = new Set(csvResult.buckets.map((bucket) => `${bucket.employeeId}|${bucket.code}`));
+assert.equal(csvKeys.size, csvResult.buckets.length, "CSV buckets unique");
 
-// Two source columns can carry the same premium code (the client export repeats
-// SH, RH and Sun headers). Buckets are totals per employee and code, so they
-// must be summed rather than inserted twice into attendance_buckets.
-const cell = (text: string) => ({
-  text,
-  value: /^-?\d+(\.\d+)?$/.test(text) ? Number(text) : null,
+/* Day minutes: 480 in a day column is eight hours. */
+const minuteSheet: Sheet = {
+  name: "minutes",
+  rows: [[cell("CODE"), cell("26")], [cell("E1"), cell("480")]],
+};
+const minuteResult = applyMappingV2({
+  sheet: minuteSheet,
+  mapping: baseMapping({ dayStart: 1, dayEnd: 1, dayUnits: { "1": "minutes" } }),
+  period,
+  employees: [employee],
+  externalIds: [],
+  schedules: {},
 });
+assert.equal(minuteResult.days[0]?.hours, 8, "day minutes become hours");
 
-const duplicateMapping: DetectedMapping = {
-  sheetName: "duplicate buckets",
-  headerRow: 0,
-  dataStartRow: 1,
-  suggestedUnit: "hours",
-  signature: "test-duplicate-buckets",
-  notes: [],
-  columns: [
-    { index: 0, header: "EMPLOYEE ID NUMBER", role: "employee_code" },
-    { index: 1, header: "ROT", role: "bucket", code: "ROT", unit: "hours" },
-    { index: 2, header: "ROT", role: "bucket", code: "ROT", unit: "hours" },
+/* Late mode: blank = full day, value = full minus late, rest day = issue. */
+const lateSheet: Sheet = {
+  name: "late",
+  rows: [
+    [cell("CODE"), cell("26"), cell("27"), cell("28")],
+    [cell("E1"), cell(""), cell("60"), cell("90")],
   ],
 };
+const lateDates = ["2026-10-26", "2026-10-27", "2026-10-28"];
+const restWeekday = weekdayOf(lateDates[1] ?? "");
+const workWeekday = weekdayOf(lateDates[0] ?? "");
+const otherWeekday = weekdayOf(lateDates[2] ?? "");
 
-const duplicateResult = applyMapping({
-  sheet: {
-    name: "duplicate buckets",
-    rows: [[cell("EMPLOYEE ID NUMBER"), cell("ROT"), cell("ROT")], [cell("E1"), cell("2"), cell("3")]],
-  },
-  mapping: duplicateMapping,
-  dayUnit: "hours",
-  period: { coverageStart: "2026-10-26", coverageEnd: "2026-11-10" },
-  employees: [{ id: "e1", employeeCode: "E1", lastName: "Doe", firstName: "Jane" }],
+const lateResult = applyMappingV2({
+  sheet: lateSheet,
+  mapping: baseMapping({ mode: "late", dayStart: 1, dayEnd: 3, dayUnits: { "1": "minutes", "2": "minutes", "3": "minutes" } }),
+  period,
+  employees: [employee],
   externalIds: [],
+  schedules: { e1: { [workWeekday]: 8, [restWeekday]: 0, [otherWeekday]: 8 } },
 });
 
-assert.equal(duplicateResult.buckets.length, 1, "duplicate bucket codes produce one row");
-assert.equal(duplicateResult.buckets[0]?.hours, 5, "duplicate bucket hours are summed");
+const firstDay = lateResult.days.find((day) => day.workDate === lateDates[0]);
+const thirdDay = lateResult.days.find((day) => day.workDate === lateDates[2]);
+assert.equal(firstDay?.hours, 8, "blank late means the full scheduled day");
+assert.equal(firstDay?.lateMinutes, 0, "blank late stores zero");
+assert.equal(thirdDay?.hours, 6.5, "late minutes are subtracted from the full day");
+assert.equal(thirdDay?.lateMinutes, 90, "late minutes are stored");
+assert.ok(
+  lateResult.issues.some((issue) => issue.kind === "late_on_rest_day"),
+  "late on a rest day is an issue",
+);
+assert.ok(!lateResult.days.some((day) => day.workDate === lateDates[1]), "rest day creates no row");
 
-const bucketKeys = new Set(csvResult.buckets.map((bucket) => `${bucket.employeeId}|${bucket.code}`));
-assert.equal(bucketKeys.size, csvResult.buckets.length, "CSV buckets are unique per employee and code");
+/* Period total: one column for the whole cutoff. */
+const totalSheet: Sheet = {
+  name: "total",
+  rows: [
+    [cell("CODE"), cell("26"), cell("LATE")],
+    [cell("E1"), cell("8"), cell("45")],
+  ],
+};
+const totalResult = applyMappingV2({
+  sheet: totalSheet,
+  mapping: baseMapping({ dayStart: 1, dayEnd: 1, periodLate: { index: 2, unit: "minutes" } }),
+  period,
+  employees: [employee],
+  externalIds: [],
+  schedules: {},
+});
+assert.equal(totalResult.totals[0]?.minutes, 45, "period late total stored separately");
+assert.equal(totalResult.days[0]?.lateMinutes, 0, "period total is not a day value");
 
-// Optional ODS fixture, passed as an argument or ODS_FIXTURE. Never hardcode a
-// client export: the parser is exercised with synthetic files in CI.
+/* Validation: a period total alone cannot produce days. */
+assert.ok(
+  validateMappingV2(baseMapping({ mode: "late", periodLate: { index: 2, unit: "minutes" } })),
+  "late mode without a day range is rejected",
+);
+
+/* Optional ODS: buckets must be unique per employee and code. */
 const odsPath = process.env.ODS_FIXTURE ?? process.argv[2];
 if (odsPath && existsSync(odsPath)) {
   const ods = parseOds(new Uint8Array(readFileSync(odsPath)));
-  const odsMap = detectMapping(ods);
+  const odsMapping = detectMappingV2(ods);
+  const codeColumn = odsMapping.employeeCode;
 
-  assert.ok(odsMap.columns.some((column) => column.role === "day"), "ODS day columns");
-  assert.ok(odsMap.headerRow >= 0, "ODS header row");
-
-  // Bind every code in the file so buckets are actually produced, then assert
-  // the (employee, code) pairs an insert would target are unique.
-  const codeColumn = odsMap.columns.find((column) => column.role === "employee_code");
   const odsEmployees: Array<{ id: string; employeeCode: string; lastName: string; firstName: string }> = [];
-  if (codeColumn) {
+  if (codeColumn != null) {
     const codes = new Set<string>();
-    for (const row of ods.rows.slice(odsMap.dataStartRow)) {
-      const code = (row[codeColumn.index]?.text ?? "").trim();
+    for (const row of ods.rows.slice(odsMapping.dataStartRow)) {
+      const code = (row[codeColumn]?.text ?? "").trim();
       if (!code || codes.has(code)) continue;
       codes.add(code);
-      odsEmployees.push({
-        id: `o${codes.size}`,
-        employeeCode: code,
-        lastName: "Test",
-        firstName: `Employee ${codes.size}`,
-      });
+      odsEmployees.push({ id: `o${codes.size}`, employeeCode: code, lastName: "Test", firstName: `E${codes.size}` });
     }
   }
 
-  const odsResult = applyMapping({
+  const odsResult = applyMappingV2({
     sheet: ods,
-    mapping: odsMap,
-    dayUnit: odsMap.suggestedUnit,
+    mapping: odsMapping,
     period: { coverageStart: "2026-10-26", coverageEnd: "2026-11-10" },
     employees: odsEmployees,
     externalIds: [],
+    schedules: {},
   });
 
-  const odsKeys = new Set(odsResult.buckets.map((bucket) => `${bucket.employeeId}|${bucket.code}`));
-  assert.equal(odsKeys.size, odsResult.buckets.length, "ODS buckets are unique per employee and code");
+  const keys = new Set(odsResult.buckets.map((bucket) => `${bucket.employeeId}|${bucket.code}`));
+  assert.equal(keys.size, odsResult.buckets.length, "ODS buckets unique");
   console.log(
-    `ODS: ${odsResult.rowsRead} rows, ${odsResult.matchedEmployees} matched, ${odsResult.buckets.length} buckets, ${odsResult.issues.length} issues`,
+    `ODS: mode ${odsMapping.mode}, ${odsResult.rowsRead} rows, ${odsResult.matchedEmployees} matched, ${odsResult.buckets.length} buckets, ${odsResult.issues.length} issues`,
   );
 } else {
   console.log("skip: no optional ODS fixture supplied");

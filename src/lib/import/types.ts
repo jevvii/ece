@@ -47,7 +47,9 @@ export type ImportIssue = {
     | "out_of_period"
     | "implausible_hours"
     | "no_days"
-    | "total_mismatch";
+    | "total_mismatch"
+    | "day_mismatch"
+    | "late_on_rest_day";
   message: string;
 };
 

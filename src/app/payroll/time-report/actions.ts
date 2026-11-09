@@ -2,28 +2,37 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import {
   attendanceBuckets,
   attendanceDays,
+  attendanceLateTotals,
   employeeExternalIds,
   employees,
   importProfiles,
   importRuns,
   payrollCalendars,
   payrollPeriods,
+  workScheduleDays,
+  workSchedules,
 } from "@/db/schema";
 import { requireWorkspace } from "@/lib/auth";
 import { parseCsv } from "@/lib/import/csv";
-import { detectMapping } from "@/lib/import/detect";
-import { applyMapping } from "@/lib/import/apply";
+import {
+  applyMappingV2,
+  detectMappingV2,
+  premiumCodes,
+  validateMappingV2,
+  type ImportMode,
+  type MappingV2,
+  type V2Unit,
+} from "@/lib/import/mapping-v2";
 import { parseOds } from "@/lib/import/ods";
 import { readUpload, saveUpload } from "@/lib/import/storage";
-import type { ColumnMapping, DetectedMapping, ImportIssue, Unit } from "@/lib/import/types";
+import type { ImportIssue } from "@/lib/import/types";
 
 const MAX_BYTES = 10 * 1024 * 1024;
-const roles = new Set(["ignore", "employee_code", "employee_name", "day", "bucket", "total"]);
 
 function canWrite(role: string) {
   return role === "company_admin" || role === "payroll_officer";
@@ -71,9 +80,9 @@ export async function uploadTimeReport(formData: FormData) {
     redirect(`/payroll/time-report?error=${encodeURIComponent(message)}`);
   }
 
-  let mapping: DetectedMapping;
+  let mapping: MappingV2;
   try {
-    mapping = detectMapping(sheet);
+    mapping = detectMappingV2(sheet);
   } catch (error) {
     const message = error instanceof Error ? error.message : "The header could not be detected";
     redirect(`/payroll/time-report?error=${encodeURIComponent(message)}`);
@@ -115,33 +124,79 @@ export async function confirmImport(formData: FormData) {
   const period = await loadPeriod(tenant.id, run.periodId);
   if (!period) redirect(`/payroll/time-report/${runId}?error=Cutoff+not+found`);
 
-  const stored = run.mapping as unknown as DetectedMapping;
-  const allowedUnits = new Set(["hours", "tenths", "minutes", "days"]);
-  const requestedUnit = String(formData.get("dayUnit") ?? stored.suggestedUnit);
-  const dayUnit: Unit = allowedUnits.has(requestedUnit)
-    ? (requestedUnit as Unit)
-    : stored.suggestedUnit;
-
-  const columns: ColumnMapping[] = stored.columns.map((column) => {
-    const roleValue = String(formData.get(`role-${column.index}`) ?? column.role);
-    const role = roles.has(roleValue) ? (roleValue as ColumnMapping["role"]) : column.role;
-    const code = String(formData.get(`code-${column.index}`) ?? column.code ?? "").trim() || undefined;
-
-    return {
-      ...column,
-      role,
-      code: role === "bucket" || role === "total" ? code : column.code,
-      unit: role === "day" ? dayUnit : column.unit,
-    };
-  });
-
-  const mapping: DetectedMapping = { ...stored, columns };
-
   const bytes = await readUpload(run.storageKey);
   const sheet =
     run.fileKind === "ods"
       ? parseOds(new Uint8Array(bytes))
       : parseCsv(new TextDecoder().decode(bytes));
+
+  // Old runs stored the v1 per-column mapping. Re-detect for those rather than
+  // trying to convert it: the screen is target-first now.
+  const stored = run.mapping as unknown as MappingV2;
+  const base = stored?.version === 2 ? stored : detectMappingV2(sheet);
+
+  const readIndex = (value: FormDataEntryValue | null, fallback: number | null) => {
+    const text = String(value ?? "");
+    if (text === "") return null;
+    const index = Number(text);
+    return Number.isInteger(index) && index >= 0 ? index : fallback;
+  };
+
+  const mode: ImportMode = String(formData.get("mode") ?? base.mode) === "late" ? "late" : "days";
+  const employeeCode = readIndex(formData.get("codeColumn"), base.employeeCode);
+  const employeeName = readIndex(formData.get("nameColumn"), base.employeeName);
+  const dayStart = readIndex(formData.get("dayStart"), base.dayStart);
+  const dayEnd = readIndex(formData.get("dayEnd"), base.dayEnd);
+
+  const dayUnits: Record<string, V2Unit> = {};
+  if (dayStart != null && dayEnd != null) {
+    for (let index = dayStart; index <= dayEnd; index += 1) {
+      const raw = String(formData.get(`unit-${index}`) ?? "");
+      dayUnits[String(index)] =
+        raw === "hours" || raw === "minutes"
+          ? raw
+          : base.dayUnits[String(index)] ?? (mode === "late" ? "minutes" : "hours");
+    }
+  }
+
+  const buckets: Record<string, number> = {};
+  for (const code of premiumCodes) {
+    const index = readIndex(formData.get(`bucket-${code}`), null);
+    if (index != null) buckets[code] = index;
+  }
+
+  const periodLateIndex = readIndex(formData.get("periodLateColumn"), base.periodLate?.index ?? null);
+  const periodLateUnit = String(formData.get("periodLateUnit") ?? base.periodLate?.unit ?? "minutes");
+  const periodLate =
+    periodLateIndex == null
+      ? null
+      : { index: periodLateIndex, unit: (periodLateUnit === "hours" ? "hours" : "minutes") as V2Unit };
+
+  const used = new Set<number>();
+  if (employeeCode != null) used.add(employeeCode);
+  if (employeeName != null) used.add(employeeName);
+  if (dayStart != null && dayEnd != null) {
+    for (let index = dayStart; index <= dayEnd; index += 1) used.add(index);
+  }
+  for (const index of Object.values(buckets)) used.add(index);
+  if (periodLate) used.add(periodLate.index);
+
+  const mapping: MappingV2 = {
+    ...base,
+    version: 2,
+    mode,
+    employeeCode,
+    employeeName,
+    dayStart,
+    dayEnd,
+    dayUnits,
+    buckets,
+    periodLate,
+    ignored: base.ignored.filter((index) => !used.has(index)),
+  };
+
+  const problem = validateMappingV2(mapping);
+  if (problem) redirect(`/payroll/time-report/${runId}?error=${encodeURIComponent(problem)}`);
 
   const [employeeRows, aliasRows] = await Promise.all([
     db
@@ -150,6 +205,7 @@ export async function confirmImport(formData: FormData) {
         employeeCode: employees.employeeCode,
         lastName: employees.lastName,
         firstName: employees.firstName,
+        scheduleId: employees.scheduleId,
       })
       .from(employees)
       .where(eq(employees.tenantId, tenant.id)),
@@ -159,13 +215,41 @@ export async function confirmImport(formData: FormData) {
       .where(eq(employeeExternalIds.tenantId, tenant.id)),
   ]);
 
-  const result = applyMapping({
+  // Late mode fills a blank cell with the scheduled hours for that weekday.
+  const scheduleIds = employeeRows.flatMap((employee) => (employee.scheduleId ? [employee.scheduleId] : []));
+  const scheduleDayRows =
+    scheduleIds.length > 0
+      ? await db
+          .select()
+          .from(workScheduleDays)
+          .where(inArray(workScheduleDays.scheduleId, scheduleIds))
+      : [];
+
+  const schedules: Record<string, Record<number, number>> = {};
+  for (const employee of employeeRows) {
+    if (!employee.scheduleId) continue;
+    const hours: Record<number, number> = {};
+    for (const day of scheduleDayRows) {
+      if (day.scheduleId !== employee.scheduleId) continue;
+      if (!day.isWorkday || !day.startTime || !day.endTime) {
+        hours[day.weekday] = 0;
+        continue;
+      }
+      const [startHour = 0, startMinute = 0] = day.startTime.split(":").map(Number);
+      const [endHour = 0, endMinute = 0] = day.endTime.split(":").map(Number);
+      const minutes = endHour * 60 + endMinute - (startHour * 60 + startMinute) - day.breakMinutes;
+      hours[day.weekday] = Math.max(0, minutes) / 60;
+    }
+    schedules[employee.id] = hours;
+  }
+
+  const result = applyMappingV2({
     sheet,
     mapping,
-    dayUnit,
     period: { coverageStart: period.period.coverageStart, coverageEnd: period.period.coverageEnd },
     employees: employeeRows,
     externalIds: aliasRows,
+    schedules,
   });
 
   // Any reviewed bindings from the resolution panel.
@@ -215,6 +299,7 @@ export async function confirmImport(formData: FormData) {
   await db.transaction(async (tx) => {
     await tx.delete(attendanceDays).where(eq(attendanceDays.runId, run.id));
     await tx.delete(attendanceBuckets).where(eq(attendanceBuckets.runId, run.id));
+    await tx.delete(attendanceLateTotals).where(eq(attendanceLateTotals.runId, run.id));
 
     for (let index = 0; index < result.days.length; index += 400) {
       const chunk = result.days.slice(index, index + 400);
@@ -225,6 +310,7 @@ export async function confirmImport(formData: FormData) {
           employeeId: day.employeeId,
           workDate: day.workDate,
           hours: day.hours.toFixed(2),
+          lateMinutes: day.lateMinutes,
           sourceValue: day.sourceValue.slice(0, 40),
         })),
       );
@@ -238,6 +324,17 @@ export async function confirmImport(formData: FormData) {
           employeeId: bucket.employeeId,
           code: bucket.code,
           hours: bucket.hours.toFixed(2),
+        })),
+      );
+    }
+
+    if (result.totals.length > 0) {
+      await tx.insert(attendanceLateTotals).values(
+        result.totals.map((total) => ({
+          runId: run.id,
+          tenantId: tenant.id,
+          employeeId: total.employeeId,
+          minutes: total.minutes,
         })),
       );
     }
@@ -266,7 +363,7 @@ async function saveProfile(input: {
   runId: string;
   existingProfileId: string | null;
   name: string;
-  mapping: DetectedMapping;
+  mapping: MappingV2;
   signature: string;
 }) {
   if (input.existingProfileId) {
