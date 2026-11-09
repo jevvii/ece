@@ -326,7 +326,7 @@ export function MappingGrid({
           }),
         ),
       };
-      return applyMappingV2({
+      const result = applyMappingV2({
         sheet,
         mapping,
         period: { coverageStart, coverageEnd },
@@ -334,6 +334,12 @@ export function MappingGrid({
         externalIds: [],
         schedules: {},
       });
+      return {
+        ...result,
+        // The browser has no schedules, so it cannot know whether one is really
+        // missing. The server import reports the real missing_schedule issues.
+        issues: result.issues.filter((issue) => issue.kind !== "missing_schedule"),
+      };
     } catch {
       return null;
     }
