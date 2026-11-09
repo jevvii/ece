@@ -54,10 +54,10 @@ export default async function TimeReportRunPage({
   searchParams,
 }: {
   params: Promise<{ runId: string }>;
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; new?: string }>;
 }) {
   const { runId } = await params;
-  const { error } = await searchParams;
+  const { error, new: isNew } = await searchParams;
   const { tenant } = await requireWorkspace();
 
   const [run] = await db
@@ -138,6 +138,30 @@ export default async function TimeReportRunPage({
     const name = mapping?.employeeName != null && row ? (row[mapping.employeeName]?.text ?? "") : "";
     return { code, name };
   });
+
+  // Mapping runs in its own full-viewport shell, modelled on onboarding.
+  if (!isImported && mapping && sheetData) {
+    return (
+      <MappingGrid
+        runId={run.id}
+        grid={sheetGrid}
+        detected={mapping}
+        employees={employeeRows}
+        unknownCodes={unknownDetails}
+        coverageStart={period?.coverageStart ?? ""}
+        coverageEnd={period?.coverageEnd ?? ""}
+        profileName={`${mapping.sheetName} · ${mapping.signature}`}
+        fileName={run.fileName}
+        periodLabel={
+          period
+            ? `${period.cycleLabel} · cutoff ${period.cutoffNo} · ${formatRange(period.coverageStart, period.coverageEnd)}`
+            : "No cutoff attached"
+        }
+        isNew={isNew === "1"}
+        error={error ? decodeURIComponent(error) : undefined}
+      />
+    );
+  }
 
   const dayRows = isImported
     ? await db
@@ -251,31 +275,9 @@ export default async function TimeReportRunPage({
         ) : null}
 
         {!isImported ? (
-          mapping && sheetData ? (
-            <>
-              <div className="mt-7 rounded-[10px] border border-rule-strong bg-surface px-4 py-3">
-                <p className="text-[12.5px] leading-[1.6] text-ink-2">
-                  {mapping.notes.join(" ")} Pick the targets below; every column you do not pick is
-                  ignored automatically.
-                </p>
-              </div>
-
-              <MappingGrid
-                runId={run.id}
-                grid={sheetGrid}
-                detected={mapping}
-                employees={employeeRows}
-                unknownCodes={unknownDetails}
-                coverageStart={period?.coverageStart ?? ""}
-                coverageEnd={period?.coverageEnd ?? ""}
-                profileName={`${mapping.sheetName} · ${mapping.signature}`}
-              />
-            </>
-          ) : (
-            <div className="mt-7 rounded-[10px] border border-[#e8c98a] bg-[#fbf3db] px-4 py-3 text-[12.5px] text-[#7a5a14]">
-              The uploaded file is no longer available, so this run cannot be mapped. Upload it again.
-            </div>
-          )
+          <div className="mt-7 rounded-[10px] border border-[#e8c98a] bg-[#fbf3db] px-4 py-3 text-[12.5px] text-[#7a5a14]">
+            The uploaded file is no longer available, so this run cannot be mapped. Upload it again.
+          </div>
         ) : (
           <>
             <div className="mt-7 grid gap-px border border-rule bg-rule sm:grid-cols-5">

@@ -185,6 +185,15 @@ button {
   animation: panel-in 250ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
+@keyframes boot-line {
+  from {
+    width: 0%;
+  }
+  to {
+    width: 100%;
+  }
+}
+
 @keyframes onboard-in {
   from {
     opacity: 0;

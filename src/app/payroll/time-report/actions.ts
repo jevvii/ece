@@ -104,7 +104,7 @@ export async function uploadTimeReport(formData: FormData) {
     createdBy: user.id,
   });
 
-  redirect(`/payroll/time-report/${runId}`);
+  redirect(`/payroll/time-report/${runId}?new=1`);
 }
 
 export async function confirmImport(formData: FormData) {
