@@ -3,9 +3,11 @@ import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { AdminTabs } from "@/components/admin-tabs";
 import { WorkspaceFooter, WorkspaceHeader } from "@/components/workspace-header";
 import { db } from "@/db/client";
-import { employees, payrollCalendars, payrollPeriods, workScheduleDays, workSchedules } from "@/db/schema";
+import { employees, payrollCalendars, payrollPeriods, ranks, workScheduleDays, workSchedules } from "@/db/schema";
 import { requireWorkspace } from "@/lib/auth";
 import { getSetupProgress } from "@/lib/workspace";
+import { saveEmployeesAction, saveRankAction } from "@/lib/setup/actions";
+import { EmployeesStage } from "@/components/setup/employees-stage";
 import { restartSetup, saveCalendar, saveCompanyDetails, saveSchedule } from "./actions";
 import { CalendarFields } from "./calendar-fields";
 import { DivisorField } from "./divisor-field";
@@ -14,13 +16,14 @@ const steps = [
   { n: 1, label: "Company details", built: true },
   { n: 2, label: "Cutoff calendar", built: true },
   { n: 3, label: "Work schedules", built: true },
-  { n: 4, label: "Employee master", built: true },
-  { n: 5, label: "Leave policy", built: false },
-  { n: 6, label: "Pay components", built: false },
-  { n: 7, label: "Posting accounts", built: false },
-  { n: 8, label: "Import mapping", built: false },
-  { n: 9, label: "Opening balances", built: false },
-  { n: 10, label: "Sample validation", built: false },
+  { n: 4, label: "Ranks", built: true },
+  { n: 5, label: "Employee master", built: true },
+  { n: 6, label: "Leave policy", built: false },
+  { n: 7, label: "Pay components", built: false },
+  { n: 8, label: "Posting accounts", built: false },
+  { n: 9, label: "Import mapping", built: false },
+  { n: 10, label: "Opening balances", built: false },
+  { n: 11, label: "Sample validation", built: false },
 ];
 
 const weekdays = [
@@ -50,7 +53,7 @@ export default async function SetupPage({
   const params = await searchParams;
   const { tenant, membership } = await requireWorkspace();
 
-  const step = Math.min(Math.max(Number(params.step ?? 1) || 1, 1), 10);
+  const step = Math.min(Math.max(Number(params.step ?? 1) || 1, 1), 11);
   const canSetup = membership.role === "company_admin" || membership.role === "payroll_officer";
 
   const [progress, calendar, schedules, people] = await Promise.all([
@@ -92,6 +95,39 @@ export default async function SetupPage({
 
   const employeeCount = people[0]?.count ?? 0;
 
+  const [rankRows, employeeRows] = await Promise.all([
+    db
+      .select()
+      .from(ranks)
+      .where(eq(ranks.tenantId, tenant.id))
+      .orderBy(asc(ranks.level), asc(ranks.name)),
+    db
+      .select({ employee: employees, rank: ranks, schedule: workSchedules })
+      .from(employees)
+      .leftJoin(ranks, eq(ranks.id, employees.rankId))
+      .leftJoin(workSchedules, eq(workSchedules.id, employees.scheduleId))
+      .where(and(eq(employees.tenantId, tenant.id), isNull(employees.archivedAt)))
+      .orderBy(asc(employees.employeeCode)),
+  ]);
+
+  const existingEmployees = employeeRows.map(({ employee, rank, schedule }) => ({
+    id: employee.id,
+    employeeCode: employee.employeeCode,
+    lastName: employee.lastName,
+    firstName: employee.firstName,
+    tin: employee.tin,
+    birthday: employee.birthday,
+    address: employee.address,
+    hireDate: employee.hireDate,
+    separationDate: employee.separationDate,
+    monthlyRate: employee.monthlyRate,
+    rankName: rank?.name ?? null,
+    scheduleName: schedule?.name ?? null,
+  }));
+
+  const rankOptions = rankRows.map((rank) => ({ id: rank.id, name: rank.name }));
+  const scheduleOptions = schedules.map((schedule) => ({ id: schedule.id, name: schedule.name }));
+
   return (
     <>
       <WorkspaceHeader breadcrumb="Admin / Setup" />
@@ -111,12 +147,12 @@ export default async function SetupPage({
             {tenant.legalName}
           </h1>
           <p className="mt-3 max-w-[60ch] text-[13.5px] leading-[1.6] text-ink-2">
-            Configure the company once. Payroll cannot open a cutoff until the calendar, schedules
-            and employee master are complete.
+            Payroll cannot open a cutoff until the company details, calendar and work schedule are
+            complete. Ranks and employees are recommended but never block.
           </p>
           </div>
           <Link
-            href="/payroll/onboarding"
+            href="/payroll/onboarding?step=1"
             className="text-[12.5px] text-ink-2 underline decoration-rule-strong underline-offset-4 hover:text-ink"
           >
             Open guided setup
@@ -349,22 +385,56 @@ export default async function SetupPage({
               <div>
                 <StepHead
                   n="04"
-                  title="Employee master"
-                  note={`${employeeCount} employees on this company. Employee records never consume an operator seat.`}
+                  title="Ranks"
+                  note="Company-defined job grades. Optional — assign them to employees as you add them."
                 />
-                <div className="mt-6 rounded-[14px] border border-rule bg-surface-2 p-5">
-                  <p className="text-[13.5px] leading-[1.65] text-ink-2">
-                    Employees carry a stable company code, employment dates, rank, schedule and
-                    monthly rate. The daily rate is derived from the company divisor, not typed by
-                    hand.
-                  </p>
-                  <Link
-                    href="/admin/employees"
-                    className="mt-4 inline-flex h-9 items-center rounded-full border border-rule-strong px-4 text-[12.5px] font-semibold uppercase tracking-[0.08em] hover:bg-surface"
-                  >
-                    Open employee master
-                  </Link>
-                </div>
+
+                {rankRows.length > 0 ? (
+                  <div className="mt-6 rounded-[14px] border border-rule">
+                    {rankRows.map((rank) => (
+                      <div
+                        key={rank.id}
+                        className="flex items-center gap-4 border-b border-rule px-4 py-3 last:border-b-0"
+                      >
+                        <span className="text-[13px] font-medium">{rank.name}</span>
+                        <span className="figure ml-auto text-[12px] text-muted">Level {rank.level}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+
+                <form action={saveRankAction} className="mt-6 border-t border-rule pt-6">
+                  <input type="hidden" name="from" value="admin" />
+                  <input type="hidden" name="step" value="4" />
+                  <div className="grid gap-4 sm:grid-cols-[1fr_140px]">
+                    <div>
+                      <label htmlFor="rankName" className={label}>Rank name</label>
+                      <input id="rankName" name="name" required placeholder="Rank and file" className={input} />
+                    </div>
+                    <div>
+                      <label htmlFor="rankLevel" className={label}>Level</label>
+                      <input id="rankLevel" name="level" type="number" min={1} max={99} defaultValue={1} className={input} />
+                    </div>
+                  </div>
+                  <StepActions canSetup={canSetup} next="Add rank" />
+                </form>
+              </div>
+            ) : step === 5 ? (
+              <div>
+                <StepHead
+                  n="05"
+                  title="Employee master"
+                  note={`${employeeCount} employees on this company. Optional — payroll can open without them.`}
+                />
+                <EmployeesStage
+                  existing={existingEmployees}
+                  ranks={rankOptions}
+                  schedules={scheduleOptions}
+                  action={saveEmployeesAction}
+                  step={5}
+                  from="admin"
+                  canSetup={canSetup}
+                />
               </div>
             ) : (
               <div>

@@ -179,6 +179,9 @@ export const employees = pgTable(
     firstName: text("first_name").notNull(),
     middleName: text("middle_name"),
     tin: text("tin"),
+    /** Optional at setup; collected from the client's master file. */
+    birthday: date("birthday"),
+    address: text("address"),
     hireDate: date("hire_date").notNull(),
     separationDate: date("separation_date"),
     status: text("status").notNull().default("active"),

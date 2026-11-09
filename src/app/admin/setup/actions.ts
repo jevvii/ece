@@ -5,17 +5,10 @@ import { redirect } from "next/navigation";
 import { and, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db/client";
-import {
-  auditEvents,
-  employees,
-  payrollCalendars,
-  payrollPeriods,
-  tenants,
-  workScheduleDays,
-  workSchedules,
-} from "@/db/schema";
+import { auditEvents, payrollCalendars, tenants, workSchedules } from "@/db/schema";
 import { requireWorkspace } from "@/lib/auth";
-import { buildPeriods, type CalendarPattern, type CalendarSpec, validateSpec } from "@/lib/calendar";
+import type { CalendarPattern, CalendarSpec } from "@/lib/calendar";
+import { addEmployees, setCalendar, setCompanyDetails, setSchedule } from "@/lib/setup/core";
 
 const setupRoles = new Set(["company_admin", "payroll_officer"]);
 
@@ -57,23 +50,7 @@ export async function saveCompanyDetails(formData: FormData) {
     redirect(`/admin/setup?step=1&error=${encodeURIComponent(parsed.error.issues[0]?.message ?? "Check the form")}`);
   }
 
-  await db
-    .update(tenants)
-    .set({
-      ...parsed.data,
-      onboardingStep: Math.max(tenant.onboardingStep, 2),
-      updatedAt: new Date(),
-    })
-    .where(eq(tenants.id, tenant.id));
-
-  await db.insert(auditEvents).values({
-    tenantId: tenant.id,
-    actorUserId: user.id,
-    entity: "tenant",
-    entityId: tenant.id,
-    action: "company.details_updated",
-    detail: { salaryDivisor: parsed.data.salaryDivisor },
-  });
+  await setCompanyDetails(tenant.id, user.id, parsed.data);
 
   revalidatePath("/admin");
   redirect("/admin/setup?step=2&saved=1");
@@ -95,62 +72,15 @@ export async function saveCalendar(formData: FormData) {
     paydayOffsetDays: Number(formData.get("paydayOffsetDays") ?? 0),
   };
 
-  const problem = validateSpec(spec);
-  if (problem) {
-    redirect(`/admin/setup?step=2&error=${encodeURIComponent(problem)}`);
-  }
-
   const year = Number(formData.get("year") ?? new Date().getFullYear());
   if (!Number.isInteger(year) || year < 2020 || year > 2100) {
     redirect("/admin/setup?step=2&error=Choose+a+valid+period+year");
   }
 
-  // Replacing a calendar archives it. Nothing is deleted, and periods keep their history.
-  await db
-    .update(payrollCalendars)
-    .set({ archivedAt: new Date() })
-    .where(and(eq(payrollCalendars.tenantId, tenant.id), isNull(payrollCalendars.archivedAt)));
-
-  const [calendar] = await db
-    .insert(payrollCalendars)
-    .values({
-      tenantId: tenant.id,
-      name:
-        pattern === "26_10"
-          ? "Semi-monthly · 26–10 / 11–25"
-          : pattern === "01_15"
-            ? "Semi-monthly · 1–15 / 16–end of month"
-            : "Semi-monthly · custom",
-      patternCode: pattern,
-      cutoff1StartDay: spec.cutoff1Start,
-      cutoff1EndDay: spec.cutoff1End,
-      cutoff2StartDay: spec.cutoff2Start,
-      cutoff2EndDay: spec.cutoff2End,
-      paydayRule: spec.paydayRule,
-      paydayOffsetDays: spec.paydayOffsetDays,
-      effectiveFrom: `${year}-01-01`,
-    })
-    .returning();
-
-  if (!calendar) redirect("/admin/setup?step=2&error=Could+not+save+the+calendar");
-
-  await db
-    .insert(payrollPeriods)
-    .values(buildPeriods(spec, year).map((period) => ({ ...period, calendarId: calendar.id })));
-
-  await db
-    .update(tenants)
-    .set({ onboardingStep: Math.max(tenant.onboardingStep, 3), updatedAt: new Date() })
-    .where(eq(tenants.id, tenant.id));
-
-  await db.insert(auditEvents).values({
-    tenantId: tenant.id,
-    actorUserId: user.id,
-    entity: "payroll_calendar",
-    entityId: calendar.id,
-    action: "calendar.created",
-    detail: { pattern, year, periods: 24 },
-  });
+  const result = await setCalendar(tenant.id, user.id, spec, year);
+  if ("error" in result && result.error) {
+    redirect(`/admin/setup?step=2&error=${encodeURIComponent(result.error)}`);
+  }
 
   revalidatePath("/admin");
   redirect("/admin/setup?step=3&saved=1");
@@ -171,51 +101,25 @@ export async function saveSchedule(formData: FormData) {
   if (!/^\d{2}:\d{2}$/.test(startTime) || !/^\d{2}:\d{2}$/.test(endTime)) {
     redirect("/admin/setup?step=3&error=Times+must+be+HH:MM");
   }
+
   const existing = await db
     .select({ id: workSchedules.id })
     .from(workSchedules)
     .where(and(eq(workSchedules.tenantId, tenant.id), isNull(workSchedules.archivedAt)));
 
-  const makeDefault = formData.get("isDefault") === "on" || existing.length === 0;
-
-  if (makeDefault) {
-    await db
-      .update(workSchedules)
-      .set({ isDefault: false })
-      .where(eq(workSchedules.tenantId, tenant.id));
-  }
-
-  const [schedule] = await db
-    .insert(workSchedules)
-    .values({ tenantId: tenant.id, name, isDefault: makeDefault, timezone: "Asia/Manila" })
-    .returning();
-
-  if (!schedule) redirect("/admin/setup?step=3&error=Could+not+save+the+schedule");
-
-  await db.insert(workScheduleDays).values(
-    [1, 2, 3, 4, 5, 6, 7].map((weekday) => ({
-      scheduleId: schedule.id,
-      weekday,
-      isWorkday: workdays.includes(weekday),
-      startTime: workdays.includes(weekday) ? startTime : null,
-      endTime: workdays.includes(weekday) ? endTime : null,
-      breakMinutes,
-    })),
-  );
-
-  await db
-    .update(tenants)
-    .set({ onboardingStep: Math.max(tenant.onboardingStep, 4), updatedAt: new Date() })
-    .where(eq(tenants.id, tenant.id));
-
-  await db.insert(auditEvents).values({
-    tenantId: tenant.id,
-    actorUserId: user.id,
-    entity: "work_schedule",
-    entityId: schedule.id,
-    action: "schedule.created",
-    detail: { name, workdays, startTime, endTime, breakMinutes },
+  const result = await setSchedule(tenant.id, user.id, {
+    name,
+    workdays,
+    startTime,
+    endTime,
+    breakMinutes,
+    isDefault: formData.get("isDefault") === "on" || existing.length === 0,
+    replace: false,
   });
+
+  if ("error" in result && result.error) {
+    redirect(`/admin/setup?step=3&error=${encodeURIComponent(result.error)}`);
+  }
 
   revalidatePath("/admin");
   redirect("/admin/setup?step=3&saved=1");
@@ -225,7 +129,11 @@ const employeeSchema = z.object({
   employeeCode: z.string().trim().min(2).max(24),
   lastName: z.string().trim().min(1).max(80),
   firstName: z.string().trim().min(1).max(80),
+  tin: z.string().trim().max(20).optional().or(z.literal("")),
+  birthday: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().or(z.literal("")),
+  address: z.string().trim().max(240).optional().or(z.literal("")),
   hireDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  separationDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().or(z.literal("")),
   monthlyRate: z.coerce.number().min(0).max(10_000_000),
   rankId: z.string().uuid().optional().or(z.literal("")),
   scheduleId: z.string().uuid().optional().or(z.literal("")),
@@ -239,7 +147,11 @@ export async function createEmployee(formData: FormData) {
     employeeCode: formData.get("employeeCode"),
     lastName: formData.get("lastName"),
     firstName: formData.get("firstName"),
+    tin: formData.get("tin") || "",
+    birthday: formData.get("birthday") || "",
+    address: formData.get("address") || "",
     hireDate: formData.get("hireDate"),
+    separationDate: formData.get("separationDate") || "",
     monthlyRate: formData.get("monthlyRate"),
     rankId: formData.get("rankId") || undefined,
     scheduleId: formData.get("scheduleId") || undefined,
@@ -252,34 +164,23 @@ export async function createEmployee(formData: FormData) {
   }
 
   const data = parsed.data;
+  const result = await addEmployees(tenant.id, user.id, tenant.salaryDivisor, tenant.regionCode, [
+    {
+      employeeCode: data.employeeCode,
+      employeeName: `${data.lastName}, ${data.firstName}`,
+      tin: data.tin || undefined,
+      birthday: data.birthday || undefined,
+      address: data.address || undefined,
+      hireDate: data.hireDate,
+      separationDate: data.separationDate || undefined,
+      monthlyRate: data.monthlyRate,
+      rankId: data.rankId || undefined,
+      scheduleId: data.scheduleId || undefined,
+    },
+  ]);
 
-  try {
-    const [employee] = await db
-      .insert(employees)
-      .values({
-        tenantId: tenant.id,
-        employeeCode: data.employeeCode,
-        lastName: data.lastName,
-        firstName: data.firstName,
-        hireDate: data.hireDate,
-        monthlyRate: data.monthlyRate.toFixed(2),
-        dailyRate: (data.monthlyRate / tenant.salaryDivisor).toFixed(2),
-        rankId: data.rankId || null,
-        scheduleId: data.scheduleId || null,
-        regionCode: tenant.regionCode,
-      })
-      .returning();
-
-    await db.insert(auditEvents).values({
-      tenantId: tenant.id,
-      actorUserId: user.id,
-      entity: "employee",
-      entityId: employee?.id,
-      action: "employee.created",
-      detail: { employeeCode: data.employeeCode },
-    });
-  } catch {
-    redirect("/admin/employees?error=That+employee+code+is+already+used");
+  if (result.errors.length > 0) {
+    redirect(`/admin/employees?error=${encodeURIComponent(result.errors[0]?.message ?? "Could not save the employee")}`);
   }
 
   revalidatePath("/admin/employees");
@@ -326,5 +227,5 @@ export async function restartSetup(formData: FormData) {
   });
 
   revalidatePath("/admin");
-  redirect("/payroll/onboarding?restarted=1");
+  redirect("/payroll/onboarding?step=1&restarted=1");
 }

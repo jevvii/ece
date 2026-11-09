@@ -64,6 +64,13 @@
       "when": 1793904485995,
       "tag": "0008_condemned_christian_walker",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1794227081864,
+      "tag": "0009_rich_nekra",
+      "breakpoints": true
     }
   ]
 }
