@@ -6,16 +6,13 @@ export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const hasSession = Boolean(request.cookies.get(SESSION_COOKIE)?.value);
 
+  // Only block requests that carry no session at all. A cookie whose session
+  // has expired or belongs to another database must fall through to the page,
+  // which checks the database — otherwise / and /sign-in redirect to each other
+  // forever. The sign-in page is what sends an already-valid user onward.
   if (!hasSession && pathname !== "/sign-in") {
     const url = request.nextUrl.clone();
     url.pathname = "/sign-in";
-    url.search = "";
-    return NextResponse.redirect(url);
-  }
-
-  if (hasSession && pathname === "/sign-in") {
-    const url = request.nextUrl.clone();
-    url.pathname = "/";
     url.search = "";
     return NextResponse.redirect(url);
   }

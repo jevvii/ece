@@ -1,5 +1,11 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { signInAction } from "@/app/actions/auth";
+import { getSession } from "@/lib/auth";
+
+function safeNext(value: string | undefined) {
+  return value && value.startsWith("/") && !value.startsWith("//") ? value : "/";
+}
 
 
 const errors: Record<string, string> = {
@@ -14,6 +20,12 @@ export default async function SignInPage({
   searchParams: Promise<{ error?: string; next?: string }>;
 }) {
   const { error, next } = await searchParams;
+
+  // A cookie can outlive its session (expired, or a different database). Only a
+  // session that still exists may skip sign-in; otherwise the form renders and
+  // signing in replaces the stale cookie.
+  const session = await getSession();
+  if (session) redirect(safeNext(next));
 
   return (
     <main className="flex min-h-screen flex-col">
