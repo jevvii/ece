@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import {
   auditEvents,
@@ -297,13 +297,18 @@ export async function addEmployees(
     db.select({ code: employees.employeeCode }).from(employees).where(eq(employees.tenantId, tenantId)),
     db.select({ id: ranks.id }).from(ranks).where(eq(ranks.tenantId, tenantId)),
     db
-      .select({ id: workSchedules.id })
+      .select({ id: workSchedules.id, isDefault: workSchedules.isDefault })
       .from(workSchedules)
-      .where(and(eq(workSchedules.tenantId, tenantId), isNull(workSchedules.archivedAt))),
+      .where(and(eq(workSchedules.tenantId, tenantId), isNull(workSchedules.archivedAt)))
+      .orderBy(asc(workSchedules.createdAt)),
   ]);
   const taken = new Set(existing.map((row) => row.code));
   const validRanks = new Set(rankRows.map((row) => row.id));
   const validSchedules = new Set(scheduleRows.map((row) => row.id));
+  // "Default" in the employee form means the company's default schedule, not no
+  // schedule at all. Without this, imported employees have no schedule and every
+  // date — including weekends — is treated as a workday downstream.
+  const defaultScheduleId = scheduleRows.find((row) => row.isDefault)?.id ?? scheduleRows[0]?.id ?? null;
 
   const valid: { input: EmployeeInput; name: { lastName: string; firstName: string } }[] = [];
 
@@ -351,7 +356,7 @@ export async function addEmployees(
           monthlyRate: input.monthlyRate.toFixed(2),
           dailyRate: (input.monthlyRate / divisor).toFixed(2),
           rankId: input.rankId || null,
-          scheduleId: input.scheduleId || null,
+          scheduleId: input.scheduleId || defaultScheduleId,
           regionCode,
         });
       }

@@ -398,7 +398,21 @@ export function MappingGrid({
                 type="button"
                 role="radio"
                 aria-checked={mode === value}
-                onClick={() => setMode(value)}
+                onClick={() => {
+                  setMode(value);
+                  // Late values are minutes by default; day values are hours.
+                  // Carrying the previous units across a mode switch silently
+                  // turned "9" into nine late hours.
+                  setUnits((current) => {
+                    const updated = { ...current };
+                    if (rangeStart != null && rangeEnd != null) {
+                      for (let index = rangeStart; index <= rangeEnd; index += 1) {
+                        updated[String(index)] = value === "late" ? "minutes" : "hours";
+                      }
+                    }
+                    return updated;
+                  });
+                }}
                 className={`h-8 rounded-full border px-3 text-[12px] font-semibold transition-colors duration-150 ${
                   mode === value ? "border-accent bg-accent-soft text-accent" : "border-rule-strong text-ink-2 hover:bg-surface-2"
                 }`}

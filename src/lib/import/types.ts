@@ -49,7 +49,8 @@ export type ImportIssue = {
     | "no_days"
     | "total_mismatch"
     | "day_mismatch"
-    | "late_on_rest_day";
+    | "late_on_rest_day"
+    | "missing_schedule";
   message: string;
 };
 

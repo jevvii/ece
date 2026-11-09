@@ -196,6 +196,15 @@ export function applyMappingV2(input: ApplyV2Input): ApplyV2Output {
     seen.add(employeeId);
     matchedEmployees += 1;
 
+    if (mapping.mode === "late" && !schedules[employeeId]) {
+      pushIssue({
+        row: rowIndex + 1,
+        code,
+        kind: "missing_schedule",
+        message: "No work schedule is assigned, so every date is treated as an 8-hour day, including rest days.",
+      });
+    }
+
     for (const column of dateColumns) {
       if (!column.date) continue;
       const cell = row[column.index];

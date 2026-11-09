@@ -31,6 +31,7 @@ const issueKindLabel: Record<string, string> = {
   total_mismatch: "Total mismatch",
   day_mismatch: "Date mismatch",
   late_on_rest_day: "Late on rest day",
+  missing_schedule: "No schedule",
 };
 
 function dateAt(start: string, offset: number) {
