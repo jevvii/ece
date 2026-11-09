@@ -34,12 +34,28 @@ function looksBinary(bytes: Uint8Array) {
 }
 
 function toGrid(sheet: Sheet): ImportSheet {
-  return {
-    name: sheet.name,
-    rows: sheet.rows
-      .slice(0, MAX_IMPORT_ROWS)
-      .map((row) => row.slice(0, MAX_IMPORT_COLS).map((cell) => cell.text)),
-  };
+  const rows = sheet.rows
+    .slice(0, MAX_IMPORT_ROWS)
+    .map((row) => row.slice(0, MAX_IMPORT_COLS).map((cell) => cell.text));
+
+  // Spreadsheet files carry hundreds of empty trailing cells (the reference
+  // ODS expands to 200 columns, 191 of them blank). Keep only columns that
+  // hold data somewhere, or the mapping screen is a wall of "Column N".
+  let width = 0;
+  for (const row of rows) {
+    for (let index = row.length - 1; index >= 0; index -= 1) {
+      if ((row[index] ?? "").trim() !== "") {
+        width = Math.max(width, index + 1);
+        break;
+      }
+    }
+  }
+
+  while (rows.length > 0 && (rows[rows.length - 1] ?? []).every((cell) => cell.trim() === "")) {
+    rows.pop();
+  }
+
+  return { name: sheet.name, rows: rows.map((row) => row.slice(0, width)) };
 }
 
 /**
