@@ -212,9 +212,28 @@ export function applyMappingV2(input: ApplyV2Input): ApplyV2Output {
 
       const text = cell.text.trim();
       const blank = text === "" && cell.value === null;
+      const halfDay = text.match(/HD\s*=\s*(\d+(?:\.\d+)?)/i);
+      const halfMinutes = halfDay ? Number(halfDay[1]) : null;
 
       if (mapping.mode === "days") {
         if (blank) continue;
+        if (halfMinutes != null) {
+          pushIssue({
+            row: rowIndex + 1,
+            column: column.index,
+            code,
+            kind: "half_day_annotation",
+            message: `"${text}" read as ${halfMinutes} minutes (${(halfMinutes / 60).toFixed(2)} h).`,
+          });
+          days.push({
+            employeeId,
+            workDate: column.date,
+            hours: round2(halfMinutes / 60),
+            lateMinutes: 0,
+            sourceValue: text,
+          });
+          continue;
+        }
         if (cell.value === null) {
           pushIssue({
             row: rowIndex + 1,
@@ -252,6 +271,34 @@ export function applyMappingV2(input: ApplyV2Input): ApplyV2Output {
         if (complete > 0) {
           days.push({ employeeId, workDate: column.date, hours: round2(complete), lateMinutes: 0, sourceValue: "" });
         }
+        continue;
+      }
+
+      if (halfMinutes != null) {
+        pushIssue({
+          row: rowIndex + 1,
+          column: column.index,
+          code,
+          kind: "half_day_annotation",
+          message: `"${text}" read as ${halfMinutes} minutes late.`,
+        });
+        if (complete <= 0) {
+          pushIssue({
+            row: rowIndex + 1,
+            column: column.index,
+            code,
+            kind: "late_on_rest_day",
+            message: `${text} on ${column.date}, which is not a scheduled workday for this employee.`,
+          });
+          continue;
+        }
+        days.push({
+          employeeId,
+          workDate: column.date,
+          hours: round2(Math.max(0, complete - halfMinutes / 60)),
+          lateMinutes: Math.round(halfMinutes),
+          sourceValue: text,
+        });
         continue;
       }
 
