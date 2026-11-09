@@ -13,12 +13,12 @@ import {
 } from "@/db/schema";
 import { requireWorkspace } from "@/lib/auth";
 import { parseCsv } from "@/lib/import/csv";
-import { detectMappingV2, premiumCodes, type MappingV2 } from "@/lib/import/mapping-v2";
+import { detectMappingV2, type MappingV2 } from "@/lib/import/mapping-v2";
 import { parseOds } from "@/lib/import/ods";
 import { readUpload } from "@/lib/import/storage";
 import type { ImportIssue, Sheet } from "@/lib/import/types";
 import { formatRange } from "@/lib/periods";
-import { MappingForm } from "./mapping-form";
+import { MappingGrid } from "./mapping-grid";
 
 const issueKindLabel: Record<string, string> = {
   unknown_employee: "Unknown code",
@@ -108,29 +108,27 @@ export default async function TimeReportRunPage({
         ? detectMappingV2(sheetData)
         : null;
 
-  const headerRow = mapping?.headerRow ?? 0;
-  const dataStartRow = mapping?.dataStartRow ?? 1;
-  const width = sheetData
-    ? Math.min(Math.max(...sheetData.rows.map((row) => row.length), 0), 200)
-    : 0;
-
-  const columns = sheetData
-    ? Array.from({ length: width }, (_, index) => {
-        let sample = "";
-        for (let row = dataStartRow; row < dataStartRow + 6; row += 1) {
-          const text = sheetData?.rows[row]?.[index]?.text?.trim() ?? "";
-          if (text) {
-            sample = text.slice(0, 24);
-            break;
-          }
+  // Trim to populated bounds so the grid never renders hundreds of empty cells.
+  let sheetGrid: string[][] = [];
+  if (sheetData) {
+    const rows = sheetData.rows.slice(0, 500);
+    let width = 0;
+    for (const row of rows) {
+      for (let index = row.length - 1; index >= 0; index -= 1) {
+        if ((row[index]?.text ?? "").trim() !== "") {
+          width = Math.max(width, index + 1);
+          break;
         }
-        return {
-          index,
-          header: sheetData?.rows[headerRow]?.[index]?.text ?? "",
-          sample,
-        };
-      })
-    : [];
+      }
+    }
+    const capped = rows.map((row) =>
+      Array.from({ length: Math.min(width, 200) }, (_, index) => row[index]?.text ?? ""),
+    );
+    while (capped.length > 0 && (capped[capped.length - 1] ?? []).every((text) => text.trim() === "")) {
+      capped.pop();
+    }
+    sheetGrid = capped;
+  }
 
   const unknownIssues = issues.filter((issue) => issue.kind === "unknown_employee");
   const unknownCodes = [...new Set(unknownIssues.map((issue) => issue.code ?? ""))].filter(Boolean);
@@ -262,11 +260,10 @@ export default async function TimeReportRunPage({
                 </p>
               </div>
 
-              <MappingForm
+              <MappingGrid
                 runId={run.id}
-                columns={columns}
+                grid={sheetGrid}
                 detected={mapping}
-                premiumCodes={premiumCodes}
                 employees={employeeRows}
                 unknownCodes={unknownDetails}
                 coverageStart={period?.coverageStart ?? ""}

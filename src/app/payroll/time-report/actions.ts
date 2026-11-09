@@ -159,10 +159,13 @@ export async function confirmImport(formData: FormData) {
     }
   }
 
-  const buckets: Record<string, number> = {};
+  const buckets: Record<string, number[]> = {};
   for (const code of premiumCodes) {
-    const index = readIndex(formData.get(`bucket-${code}`), null);
-    if (index != null) buckets[code] = index;
+    const indexes = formData
+      .getAll(`bucket-${code}`)
+      .map((value) => Number(value))
+      .filter((index) => Number.isInteger(index) && index >= 0);
+    if (indexes.length > 0) buckets[code] = [...new Set(indexes)];
   }
 
   const periodLateIndex = readIndex(formData.get("periodLateColumn"), base.periodLate?.index ?? null);
@@ -178,7 +181,7 @@ export async function confirmImport(formData: FormData) {
   if (dayStart != null && dayEnd != null) {
     for (let index = dayStart; index <= dayEnd; index += 1) used.add(index);
   }
-  for (const index of Object.values(buckets)) used.add(index);
+  for (const indexes of Object.values(buckets)) for (const index of indexes) used.add(index);
   if (periodLate) used.add(periodLate.index);
 
   const mapping: MappingV2 = {

@@ -118,6 +118,25 @@ assert.ok(
 );
 assert.ok(!lateResult.days.some((day) => day.workDate === lateDates[1]), "rest day creates no row");
 
+/* A premium code can collect several source columns; their hours are summed. */
+const multiBucketSheet: Sheet = {
+  name: "multi bucket",
+  rows: [
+    [cell("CODE"), cell("SH"), cell("SH")],
+    [cell("E1"), cell("2"), cell("3")],
+  ],
+};
+const multiBucketResult = applyMappingV2({
+  sheet: multiBucketSheet,
+  mapping: baseMapping({ dayStart: null, dayEnd: null, buckets: { SH: [1, 2] } }),
+  period,
+  employees: [employee],
+  externalIds: [],
+  schedules: {},
+});
+assert.equal(multiBucketResult.buckets.length, 1, "multi-column bucket produces one row");
+assert.equal(multiBucketResult.buckets[0]?.hours, 5, "multi-column bucket hours are summed");
+
 /* Period total: one column for the whole cutoff. */
 const totalSheet: Sheet = {
   name: "total",
