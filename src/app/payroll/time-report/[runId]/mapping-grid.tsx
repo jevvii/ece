@@ -339,6 +339,24 @@ export function MappingGrid({
     }
   }, [grid, rowCount, colCount, detected.sheetName, mapping, coverageStart, coverageEnd, employees]);
 
+  const reviewRows = useMemo(() => {
+    const summary = new Map<string, { days: number; hours: number; late: number }>();
+    const order: string[] = [];
+    for (const day of preview?.days ?? []) {
+      if (!summary.has(day.employeeId)) order.push(day.employeeId);
+      const entry = summary.get(day.employeeId) ?? { days: 0, hours: 0, late: 0 };
+      entry.days += 1;
+      entry.hours += day.hours;
+      entry.late += day.lateMinutes;
+      summary.set(day.employeeId, entry);
+    }
+    return order.map((id) => ({
+      id,
+      employee: employees.find((candidate) => candidate.id === id),
+      ...(summary.get(id) ?? { days: 0, hours: 0, late: 0 }),
+    }));
+  }, [preview, employees]);
+
   const startRow = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - 4);
   const endRow = Math.min(rowCount, startRow + WINDOW_ROWS + 8);
   const topPad = startRow * ROW_HEIGHT;
@@ -473,24 +491,47 @@ export function MappingGrid({
                 Preview uses an eight-hour fallback schedule; the import uses each employee's real schedule.
               </p>
 
+              {preview?.issues.some((issue) => issue.kind === "day_mismatch") ? (
+                <p className="mt-3 rounded-[10px] border border-warn/25 bg-[#fbf3db] px-3 py-2 text-[11.5px] leading-[1.6] text-[#7a5a14]">
+                  The file&apos;s day numbers do not line up with the selected cutoff. Dates are assigned
+                  sequentially from the cutoff start, so check the first and last date columns, or choose a
+                  cutoff that matches the file&apos;s period.
+                </p>
+              ) : null}
+
               <div className="mt-6 rounded-[14px] border border-rule">
-                <div className="border-b border-rule px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">First employees</div>
+                <div className="flex items-center justify-between border-b border-rule px-4 py-2.5">
+                  <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">First employees</span>
+                  <span className="text-[10.5px] text-muted">totals across the mapped dates</span>
+                </div>
                 <div className="max-h-[280px] overflow-auto">
                   <table className="w-full border-collapse text-left">
+                    <thead>
+                      <tr className="border-b border-rule">
+                        {["Code", "Employee", "Days", "Hours", "Late"].map((heading) => (
+                          <th
+                            key={heading}
+                            className={`px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted ${
+                              heading === "Days" || heading === "Hours" || heading === "Late" ? "text-right" : ""
+                            }`}
+                          >
+                            {heading}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
                     <tbody>
-                      {Array.from(new Map((preview?.days ?? []).map((day) => [day.employeeId, day])).values())
-                        .slice(0, 10)
-                        .map((day) => {
-                          const employee = employees.find((candidate) => candidate.id === day.employeeId);
-                          return (
-                            <tr key={day.employeeId} className="border-b border-rule last:border-b-0">
-                              <td className="figure px-3 py-2 text-[11.5px] text-muted">{employee?.employeeCode}</td>
-                              <td className="px-3 py-2 text-[12px]">{employee ? `${employee.lastName}, ${employee.firstName}` : "—"}</td>
-                              <td className="figure px-3 py-2 text-right text-[12px]">{day.hours.toFixed(2)} h</td>
-                              <td className="figure px-3 py-2 text-right text-[11.5px] text-muted">{day.lateMinutes} min</td>
-                            </tr>
-                          );
-                        })}
+                      {reviewRows.slice(0, 10).map((row) => (
+                        <tr key={row.id} className="border-b border-rule last:border-b-0">
+                          <td className="figure px-3 py-2 text-[11.5px] text-muted">{row.employee?.employeeCode ?? "—"}</td>
+                          <td className="px-3 py-2 text-[12px]">
+                            {row.employee ? `${row.employee.lastName}, ${row.employee.firstName}` : "—"}
+                          </td>
+                          <td className="figure px-3 py-2 text-right text-[11.5px] text-muted">{row.days}</td>
+                          <td className="figure px-3 py-2 text-right text-[12px]">{row.hours.toFixed(2)}</td>
+                          <td className="figure px-3 py-2 text-right text-[11.5px] text-muted">{row.late}</td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                 </div>

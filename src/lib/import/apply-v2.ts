@@ -111,7 +111,20 @@ export function applyMappingV2(input: ApplyV2Input): ApplyV2Output {
     }
   }
 
-  const headerRow = sheet.rows[mapping.headerRow] ?? [];
+  // The day band is often several rows above the employee-code header (the
+  // client ODS has days on row 5 and codes on row 7). Search upward for a
+  // 1–31 number in the column instead of assuming it sits on headerRow.
+  const headerDayFor = (columnIndex: number) => {
+    const limit = Math.min(mapping.headerRow, sheet.rows.length - 1);
+    for (let row = 0; row <= limit; row += 1) {
+      const text = (sheet.rows[row]?.[columnIndex]?.text ?? "").trim();
+      if (!/^\d{1,2}$/.test(text)) continue;
+      const day = Number(text);
+      if (day >= 1 && day <= 31) return { day, row };
+    }
+    return null;
+  };
+
   for (const column of dateColumns) {
     if (!column.date) {
       pushIssue({
@@ -122,14 +135,15 @@ export function applyMappingV2(input: ApplyV2Input): ApplyV2Output {
       });
       continue;
     }
-    const headerDay = Number((headerRow[column.index]?.text ?? "").trim());
+    const found = headerDayFor(column.index);
+    if (!found) continue;
     const dateDay = Number(column.date.slice(8, 10));
-    if (Number.isFinite(headerDay) && headerDay !== dateDay) {
+    if (found.day !== dateDay) {
       pushIssue({
-        row: mapping.headerRow + 1,
+        row: found.row + 1,
         column: column.index,
         kind: "day_mismatch",
-        message: `Header says day ${headerDay}, but the cutoff maps this column to ${column.date}.`,
+        message: `Header says day ${found.day}, but the cutoff maps this column to ${column.date}.`,
       });
     }
   }
