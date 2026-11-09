@@ -112,7 +112,7 @@ function parseSheet(table: Record<string, unknown>): Sheet {
   return { name, rows };
 }
 
-export function parseOds(buffer: Uint8Array): Sheet {
+function readTables(buffer: Uint8Array): Record<string, unknown>[] {
   const files = unzipSync(buffer);
   const content = files["content.xml"];
   if (!content) throw new Error("This .ods file has no content.xml");
@@ -126,5 +126,14 @@ export function parseOds(buffer: Uint8Array): Sheet {
   );
 
   if (tables.length === 0) throw new Error("No sheets found in the workbook");
-  return parseSheet(tables[0] as Record<string, unknown>);
+  return tables as Record<string, unknown>[];
+}
+
+export function parseOds(buffer: Uint8Array): Sheet {
+  return parseSheet(readTables(buffer)[0] as Record<string, unknown>);
+}
+
+/** Every sheet in the workbook, for screens that let the user choose one. */
+export function parseOdsSheets(buffer: Uint8Array): Sheet[] {
+  return readTables(buffer).map((table) => parseSheet(table));
 }

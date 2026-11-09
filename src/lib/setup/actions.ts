@@ -19,6 +19,7 @@ import {
   setSchedule,
 } from "@/lib/setup/core";
 import { getSetupState } from "@/lib/setup/stages";
+import { MAX_IMPORT_BYTES, parseEmployeeWorkbook, type ImportSheet } from "@/lib/employees/parse-file";
 import type { CalendarPattern } from "@/lib/calendar";
 
 const setupRoles = new Set(["company_admin", "payroll_officer"]);
@@ -245,8 +246,7 @@ const companyCreateSchema = z.object({
   regionCode: z.string().trim().min(1).max(12),
 });
 
-export async function createCompanyAction(formData: FormData) {
-  const { tenant, user, membership } = await requireWorkspace();
+export async function createCompanyAction(formData: FormData) {  const { tenant, user, membership } = await requireWorkspace();
   await requireSetupRole(membership.role, formData, 1);
 
   const parsed = companyCreateSchema.safeParse({
@@ -274,4 +274,52 @@ export async function createCompanyAction(formData: FormData) {
 
   revalidatePath("/admin");
   redirect("/payroll/onboarding?step=1");
+}
+
+/* ---------------------------------------------------------------- */
+/* Spreadsheet import                                                */
+/* ---------------------------------------------------------------- */
+
+export type ParseWorkbookState = {
+  status: "idle" | "ok" | "error";
+  error?: string;
+  fileName?: string;
+  kind?: "csv" | "ods" | "xlsx";
+  sheets?: ImportSheet[];
+};
+
+/**
+ * Reads a roster file and returns it as bounded text grids. Nothing is written
+ * to the database or to storage — the file is parsed in this request and
+ * discarded. Mapping and validation happen on the client, and the rows come
+ * back through saveEmployeesAction like any other employee submission.
+ */
+export async function parseEmployeeFileAction(
+  _previous: ParseWorkbookState,
+  formData: FormData,
+): Promise<ParseWorkbookState> {
+  const { membership } = await requireWorkspace();
+
+  if (!setupRoles.has(membership.role)) {
+    return { status: "error", error: "Your role cannot import employees." };
+  }
+
+  const file = formData.get("file");
+  if (!(file instanceof File) || file.size === 0) {
+    return { status: "error", error: "Choose a .csv, .xlsx or .ods file." };
+  }
+  if (file.size > MAX_IMPORT_BYTES) {
+    return { status: "error", error: "Files must be 5 MB or smaller." };
+  }
+
+  try {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const workbook = parseEmployeeWorkbook(bytes, file.name);
+    return { status: "ok", ...workbook };
+  } catch (error) {
+    return {
+      status: "error",
+      error: error instanceof Error ? error.message : "Could not read the file.",
+    };
+  }
 }

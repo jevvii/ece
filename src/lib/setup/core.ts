@@ -305,7 +305,7 @@ export async function addEmployees(
   const validRanks = new Set(rankRows.map((row) => row.id));
   const validSchedules = new Set(scheduleRows.map((row) => row.id));
 
-  let created = 0;
+  const valid: { input: EmployeeInput; name: { lastName: string; firstName: string } }[] = [];
 
   for (const [index, input] of inputs.entries()) {
     const name = splitEmployeeName(input.employeeName);
@@ -326,30 +326,44 @@ export async function addEmployees(
       continue;
     }
 
-    try {
-      await db.insert(employees).values({
-        tenantId,
-        employeeCode: input.employeeCode,
-        lastName: name.lastName,
-        firstName: name.firstName,
-        tin: input.tin || null,
-        birthday: input.birthday || null,
-        address: input.address || null,
-        hireDate: input.hireDate,
-        separationDate: input.separationDate || null,
-        status: input.separationDate ? "separated" : "active",
-        monthlyRate: input.monthlyRate.toFixed(2),
-        dailyRate: (input.monthlyRate / divisor).toFixed(2),
-        rankId: input.rankId || null,
-        scheduleId: input.scheduleId || null,
-        regionCode,
-      });
-      taken.add(input.employeeCode);
-      created += 1;
-    } catch {
-      errors.push({ row: index + 1, message: `Could not save ${input.employeeCode}.` });
-    }
+    // Claim the code now so duplicates inside the same file are caught too.
+    taken.add(input.employeeCode);
+    valid.push({ input, name });
   }
+
+  // All-or-nothing: one bad row leaves the roster untouched.
+  if (errors.length > 0) return { created: 0, errors };
+
+  try {
+    await db.transaction(async (tx) => {
+      for (const { input, name } of valid) {
+        await tx.insert(employees).values({
+          tenantId,
+          employeeCode: input.employeeCode,
+          lastName: name.lastName,
+          firstName: name.firstName,
+          tin: input.tin || null,
+          birthday: input.birthday || null,
+          address: input.address || null,
+          hireDate: input.hireDate,
+          separationDate: input.separationDate || null,
+          status: input.separationDate ? "separated" : "active",
+          monthlyRate: input.monthlyRate.toFixed(2),
+          dailyRate: (input.monthlyRate / divisor).toFixed(2),
+          rankId: input.rankId || null,
+          scheduleId: input.scheduleId || null,
+          regionCode,
+        });
+      }
+    });
+  } catch {
+    return {
+      created: 0,
+      errors: [{ row: 0, message: "The roster could not be saved. Nothing was written." }],
+    };
+  }
+
+  const created = valid.length;
 
   if (created > 0) {
     const [tenant] = await db.select().from(tenants).where(eq(tenants.id, tenantId)).limit(1);

@@ -1,19 +1,13 @@
 "use client";
 
 import { useMemo, useState } from "react";
-
-type Draft = {
-  employeeCode: string;
-  employeeName: string;
-  tin: string;
-  birthday: string;
-  address: string;
-  hireDate: string;
-  separationDate: string;
-  monthlyRate: string;
-  rankId: string;
-  scheduleId: string;
-};
+import { EmployeeImport } from "./employee-import";
+import {
+  blankDraft,
+  parsePasteRows,
+  rowProblem,
+  type EmployeeDraft,
+} from "./employee-row";
 
 type Option = { id: string; name: string };
 
@@ -34,116 +28,12 @@ type Existing = {
 
 const input =
   "h-9 w-full rounded-[10px] border border-rule-strong bg-surface px-2 text-[12.5px] outline-none focus:border-accent focus:ring-2 focus:ring-accent/15";
-const label = "block text-[11px] font-semibold uppercase tracking-[0.1em] text-muted";
 
 const peso = new Intl.NumberFormat("en-PH", {
   style: "currency",
   currency: "PHP",
   minimumFractionDigits: 2,
 });
-
-function blank(): Draft {
-  return {
-    employeeCode: "",
-    employeeName: "",
-    tin: "",
-    birthday: "",
-    address: "",
-    hireDate: "",
-    separationDate: "",
-    monthlyRate: "",
-    rankId: "",
-    scheduleId: "",
-  };
-}
-
-function normaliseHeader(value: string) {
-  return value.toLowerCase().replace(/[^a-z]/g, "");
-}
-
-function normaliseDate(value: string) {
-  const trimmed = value.trim();
-  if (!trimmed) return "";
-  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
-  const slash = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (slash) {
-    const [, month = "", day = "", year = ""] = slash;
-    return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
-  }
-  return trimmed;
-}
-
-const HEADERS: Record<string, keyof Draft> = {
-  employeeid: "employeeCode",
-  employeecode: "employeeCode",
-  code: "employeeCode",
-  id: "employeeCode",
-  employeename: "employeeName",
-  name: "employeeName",
-  tin: "tin",
-  birthday: "birthday",
-  birthdate: "birthday",
-  dateofbirth: "birthday",
-  address: "address",
-  datehired: "hireDate",
-  hiredate: "hireDate",
-  hired: "hireDate",
-  dateterminated: "separationDate",
-  separationdate: "separationDate",
-  terminated: "separationDate",
-  monthlyrate: "monthlyRate",
-  rate: "monthlyRate",
-  salary: "monthlyRate",
-};
-
-function parsePaste(text: string) {
-  const lines = text
-    .split(/\r?\n/)
-    .map((line) => line.trimEnd())
-    .filter((line) => line.trim().length > 0);
-
-  if (lines.length < 2) {
-    return { rows: [] as Draft[], error: "Paste a header row and at least one employee row." };
-  }
-
-  const headerLine = lines[0] ?? "";
-  const delimiter = headerLine.includes("\t") ? "\t" : ",";
-  const headers = headerLine.split(delimiter).map((header) => HEADERS[normaliseHeader(header)]);
-
-  if (!headers.includes("employeeCode") || !headers.includes("employeeName")) {
-    return {
-      rows: [] as Draft[],
-      error: "The header needs an Employee ID and an Employee Name column.",
-    };
-  }
-
-  const rows = lines.slice(1).map((line) => {
-    const cells = line.split(delimiter);
-    const draft = blank();
-    headers.forEach((key, index) => {
-      if (!key) return;
-      const value = (cells[index] ?? "").trim();
-      if (key === "birthday" || key === "hireDate" || key === "separationDate") {
-        draft[key] = normaliseDate(value);
-      } else if (key === "monthlyRate") {
-        draft.monthlyRate = value.replace(/[₱,\s]/g, "");
-      } else {
-        draft[key] = value;
-      }
-    });
-    return draft;
-  });
-
-  return { rows, error: null as string | null };
-}
-
-function rowProblem(row: Draft) {
-  if (!row.employeeCode.trim()) return "Code missing";
-  if (!row.employeeName.includes(",")) return "Name must be \"Last, First\"";
-  if (!row.hireDate) return "Hire date missing";
-  if (!row.monthlyRate || Number.isNaN(Number(row.monthlyRate))) return "Rate missing";
-  return null;
-}
 
 export function EmployeesStage({
   existing,
@@ -162,21 +52,21 @@ export function EmployeesStage({
   from: "guided" | "admin";
   canSetup: boolean;
 }) {
-  const [rows, setRows] = useState<Draft[]>([]);
+  const [rows, setRows] = useState<EmployeeDraft[]>([]);
   const [paste, setPaste] = useState("");
   const [pasteError, setPasteError] = useState<string | null>(null);
 
   const problems = useMemo(() => rows.map(rowProblem), [rows]);
   const blocked = problems.some(Boolean);
 
-  function update(index: number, key: keyof Draft, value: string) {
+  function update(index: number, key: keyof EmployeeDraft, value: string) {
     setRows((current) =>
       current.map((row, position) => (position === index ? { ...row, [key]: value } : row)),
     );
   }
 
   function applyPaste() {
-    const result = parsePaste(paste);
+    const result = parsePasteRows(paste);
     setPasteError(result.error);
     if (!result.error) {
       setRows((current) => [...current, ...result.rows]);
@@ -243,12 +133,17 @@ export function EmployeesStage({
           </h3>
           <button
             type="button"
-            onClick={() => setRows((current) => [...current, blank()])}
+            onClick={() => setRows((current) => [...current, blankDraft()])}
             className="h-9 rounded-full border border-rule-strong px-4 text-[12.5px] font-semibold hover:bg-surface-2"
           >
             Add row
           </button>
         </div>
+
+        <EmployeeImport
+          canSetup={canSetup}
+          onRows={(incoming) => setRows((current) => [...current, ...incoming])}
+        />
 
         <details className="mt-3 rounded-[14px] border border-rule bg-surface-2 px-4 py-3">
           <summary className="cursor-pointer text-[12.5px] font-semibold marker:hidden">
