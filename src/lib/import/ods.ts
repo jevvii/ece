@@ -63,7 +63,12 @@ function parseSheet(table: Record<string, unknown>): Sheet {
   const rawRows = asArray(table["table:table-row"] as Record<string, unknown> | Record<string, unknown>[]);
 
   for (const row of rawRows) {
-    if (rows.length >= MAX_ROWS) break;
+    if (rows.length >= MAX_ROWS) {
+      if (asArray(row["table:table-cell"] as Record<string, unknown>[]).some((cell) => textOf(cell["text:p"]) || cell["@_office:value"])) {
+        throw new Error("This worksheet contains data beyond the supported rows. Split the report before importing.");
+      }
+      continue;
+    }
 
     const rowRepeat = Math.min(Number(row["@_table:number-rows-repeated"] ?? 1) || 1, 50);
     const cells: Cell[] = [];
@@ -72,7 +77,12 @@ function parseSheet(table: Record<string, unknown>): Sheet {
     ];
 
     for (const cell of rawCells) {
-      if (cells.length >= MAX_COLS) break;
+      if (cells.length >= MAX_COLS) {
+        if (textOf(cell["text:p"]) || cell["@_office:value"]) {
+          throw new Error("This worksheet contains data beyond the supported columns. Split the report before importing.");
+        }
+        continue;
+      }
 
       const repeat = Math.min(Number(cell["@_table:number-columns-repeated"] ?? 1) || 1, 256);
       const text = textOf(cell["text:p"] ?? cell).replace(/ /g, " ").trim();

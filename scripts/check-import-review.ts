@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { zipSync, strToU8 } from "fflate";
+import { parseEmployeeWorkbook } from "../src/lib/employees/parse-file";
+import { zipSync, strToU8, unzipSync, strFromU8 } from "fflate";
 import { parseTimeReportFile } from "../src/lib/import/parse-file";
 import { applyMappingV2, type MappingV2 } from "../src/lib/import/apply-v2";
 import { detectMappingV2 } from "../src/lib/import/mapping-v2";
@@ -21,7 +22,12 @@ const xlsx = zipSync({
   "xl/worksheets/sheet1.xml": strToU8('<worksheet><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Code</t></is></c><c r="B1"><v>26</v></c></row><row r="2"><c r="A2" t="inlineStr"><is><t>E1</t></is></c><c r="B2"><v>8</v></c></row></sheetData></worksheet>'),
 });
 assert.equal(parseTimeReportFile(xlsx, "attendance.xlsx").rows[1]?.[1]?.value, 8);
+const farRow = unzipSync(xlsx);
+farRow["xl/worksheets/sheet1.xml"] = strToU8(strFromU8(farRow["xl/worksheets/sheet1.xml"]!).replace("</sheetData>", '<row r="6001"><c r="A6001" t="inlineStr"><is><t>E2</t></is></c></row></sheetData>'));
+assert.throws(() => parseTimeReportFile(zipSync(farRow), "large.xlsx"), /rows/, "data beyond the reader limit must never disappear silently");
+
 assert.throws(() => parseTimeReportFile(strToU8(`Code,26\n${"E1,8\n".repeat(501)}`), "large.csv"), /500/);
+assert.throws(() => parseEmployeeWorkbook(strToU8(`Code,Name\n${"E1,Jane\n".repeat(501)}`), "large.csv"), /500/, "employee roster overflow is rejected instead of truncated");
 assert.match(validateMappingV2({ ...mapping, dataStartRow: 3 }, sheet) ?? "", /data row/);
 assert.match(validateMappingV2({ ...mapping, employeeCode: 5 }, sheet) ?? "", /outside/);
 assert.match(validateMappingV2({ ...mapping, employeeCode: 1 }, sheet) ?? "", /more than one/);

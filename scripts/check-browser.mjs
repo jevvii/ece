@@ -128,6 +128,10 @@ try {
   await page.goto(`${BASE}/admin/setup?step=5`, { waitUntil: "networkidle" });
   await page.setInputFiles("#employee-file", "fixtures/employees-sample.csv");
   await page.getByLabel("Code row 1").waitFor({ timeout: 60_000 });
+  await page.waitForFunction(() => {
+    const heading = [...document.querySelectorAll("h3")].find((node) => node.textContent?.startsWith("Review employees"));
+    return heading && heading.getBoundingClientRect().top < innerHeight;
+  }, undefined, { timeout: 3000 });
   const firstCode = await page.getByLabel("Code row 1").inputValue();
   if (firstCode !== "EMP-1001") {
     throw new Error(`Expected the preview to start with EMP-1001, received "${firstCode}"`);

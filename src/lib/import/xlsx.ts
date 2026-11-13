@@ -74,7 +74,13 @@ function parseWorksheet(xml: string, shared: string[], name: string): Sheet {
 
   for (const row of rawRows) {
     const target = rowIndex(row["@_r"] as string | undefined, lastRow + 1);
-    if (target < 0 || target >= MAX_ROWS) continue;
+    if (target < 0) continue;
+    if (target >= MAX_ROWS) {
+      if (asArray(row["c"] as Record<string, unknown>[]).some((cell) => textOf(cell["v"]) || textOf(cell["is"]) || cell["f"])) {
+        throw new Error("This worksheet contains data beyond the supported rows. Split the report before importing.");
+      }
+      continue;
+    }
 
     const cells: Cell[] = [];
     let position = 0;
@@ -82,7 +88,13 @@ function parseWorksheet(xml: string, shared: string[], name: string): Sheet {
     for (const cell of asArray(row["c"] as Record<string, unknown> | Record<string, unknown>[])) {
       const column = columnIndex(cell["@_r"] as string | undefined, position);
       position = column + 1;
-      if (column < 0 || column >= MAX_COLS) continue;
+      if (column < 0) continue;
+      if (column >= MAX_COLS) {
+        if (textOf(cell["v"]) || textOf(cell["is"]) || cell["f"]) {
+          throw new Error("This worksheet contains data beyond the supported columns. Split the report before importing.");
+        }
+        continue;
+      }
 
       while (cells.length < column) cells.push({ text: "", value: null });
 
