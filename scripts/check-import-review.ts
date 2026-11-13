@@ -1,0 +1,52 @@
+import assert from "node:assert/strict";
+import { zipSync, strToU8 } from "fflate";
+import { parseTimeReportFile } from "../src/lib/import/parse-file";
+import { applyMappingV2, type MappingV2 } from "../src/lib/import/apply-v2";
+import { detectMappingV2 } from "../src/lib/import/mapping-v2";
+import { validateMappingV2 } from "../src/lib/import/review";
+
+const mapping: MappingV2 = {
+  version: 2, sheetName: "Attendance", mode: "days", headerRow: 0, dataStartRow: 1,
+  employeeCode: 0, employeeName: null, dayStart: 1, dayEnd: 1, dayUnits: {},
+  buckets: {}, periodLate: null, ignored: [], signature: "test", notes: [],
+};
+const bytes = strToU8('Code;26\nEXT-1;"1,200"');
+const sheet = parseTimeReportFile(bytes, "attendance.csv");
+assert.equal(detectMappingV2(parseTimeReportFile(strToU8("Code,Name,26,27,28\nE1,Jane,8,8,8"), "attendance.csv")).employeeCode, 0, "a Code header works with one employee");
+assert.equal(sheet.rows[1]?.[1]?.value, 1200, "delimiter and numeric values are preserved");
+assert.throws(() => parseTimeReportFile(strToU8("not a zip"), "attendance.xlsx"), /archive/);
+assert.throws(() => parseTimeReportFile(strToU8(""), "attendance.csv"), /empty/);
+const xlsx = zipSync({
+  "xl/workbook.xml": strToU8('<workbook><sheets><sheet name="Attendance" r:id="rId1"/></sheets></workbook>'),
+  "xl/worksheets/sheet1.xml": strToU8('<worksheet><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Code</t></is></c><c r="B1"><v>26</v></c></row><row r="2"><c r="A2" t="inlineStr"><is><t>E1</t></is></c><c r="B2"><v>8</v></c></row></sheetData></worksheet>'),
+});
+assert.equal(parseTimeReportFile(xlsx, "attendance.xlsx").rows[1]?.[1]?.value, 8);
+assert.throws(() => parseTimeReportFile(strToU8(`Code,26\n${"E1,8\n".repeat(501)}`), "large.csv"), /500/);
+assert.match(validateMappingV2({ ...mapping, dataStartRow: 3 }, sheet) ?? "", /data row/);
+assert.match(validateMappingV2({ ...mapping, employeeCode: 5 }, sheet) ?? "", /outside/);
+assert.match(validateMappingV2({ ...mapping, employeeCode: 1 }, sheet) ?? "", /more than one/);
+const employee = { id: "e1", employeeCode: "E1", lastName: "Doe", firstName: "Jane" };
+const input = {
+  sheet: parseTimeReportFile(strToU8("Code,26\nEXT-1,8\nE1,8"), "attendance.csv"), mapping,
+  period: { coverageStart: "2026-10-26", coverageEnd: "2026-10-26" },
+  employees: [employee], externalIds: [{ code: "EXT-1", employeeId: "e1" }], schedules: {},
+};
+const result = applyMappingV2(input);
+assert.equal(result.days.length, 1, "reviewed alias includes the employee immediately");
+assert.equal(result.blockingIssueCount, 1, "duplicate alias and canonical code blocks saving");
+const corrected = applyMappingV2({ ...input, mapping: { ...mapping, dataStartRow: 2 } });
+assert.equal(corrected.blockingIssueCount, 0, "chosen data start excludes the duplicate");
+const negative = applyMappingV2({ ...input, sheet: parseTimeReportFile(strToU8("Code,26\nE1,-1"), "attendance.csv") });
+assert.ok(negative.blockingIssueCount > 0, "negative hours block import");
+const capped = applyMappingV2({ ...input, sheet: { name: "test", rows: [input.sheet.rows[0]!, ...Array.from({ length: 450 }, () => input.sheet.rows[1]!)] } });
+assert.equal(capped.issues.length, 300);
+assert.equal(capped.blockingIssueCount, 449, "issue cap cannot hide blocking conflicts");
+for (const [value, mode] of [["-5", "late"], ["99999", "late"], ["HD=99999", "days"]] as const) {
+  const invalid = applyMappingV2({ ...input, mapping: { ...mapping, mode }, schedules: { e1: { 1: 8 } },
+    sheet: parseTimeReportFile(strToU8(`Code,26\nE1,${value}`), "attendance.csv") });
+  assert.ok(invalid.blockingIssueCount > 0, `${value} in ${mode} mode blocks importing`);
+}
+const invalidPremium = applyMappingV2({ ...input, mapping: { ...mapping, buckets: { ROT: [2] } },
+  sheet: parseTimeReportFile(strToU8("Code,26,ROT\nE1,8,oops"), "attendance.csv") });
+assert.ok(invalidPremium.blockingIssueCount > 0, "non-numeric premium cannot be silently discarded");
+console.log("import review checks passed");

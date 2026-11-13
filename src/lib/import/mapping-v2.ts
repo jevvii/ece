@@ -64,11 +64,4 @@ export function detectMappingV2(sheet: Sheet): MappingV2 {
   };
 }
 
-export function validateMappingV2(mapping: MappingV2): string | null {
-  if (mapping.employeeCode == null) return "Map the employee code column.";
-  if (mapping.dayStart == null || mapping.dayEnd == null) {
-    return "Map the first and last day columns. A period total on its own cannot produce attendance days.";
-  }
-  if (mapping.dayStart > mapping.dayEnd) return "The first day column must come before the last.";
-  return null;
-}
+export { validateMappingV2 } from "./review";

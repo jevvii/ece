@@ -1,3 +1,4 @@
+import { isBlockingIssue } from "./review";
 import { premiumMatrix } from "@/lib/payroll/statutory";
 import type { ImportIssue, Sheet } from "./types";
 
@@ -58,6 +59,7 @@ export type ApplyV2Output = {
   totals: Array<{ employeeId: string; minutes: number }>;
   issues: ImportIssue[];
   unknownCodes: string[];
+  blockingIssueCount: number;
   matchedEmployees: number;
   rowsRead: number;
 };
@@ -87,7 +89,10 @@ export function applyMappingV2(input: ApplyV2Input): ApplyV2Output {
 
   const byCode = new Map<string, string>();
   for (const employee of employees) byCode.set(normalizeCode(employee.employeeCode), employee.id);
-  for (const alias of externalIds) byCode.set(normalizeCode(alias.code), alias.employeeId);
+  for (const alias of externalIds) {
+    const code = normalizeCode(alias.code);
+    if (!byCode.has(code)) byCode.set(code, alias.employeeId);
+  }
 
   const issues: ImportIssue[] = [];
   const days: ApplyV2Output["days"] = [];
@@ -96,7 +101,9 @@ export function applyMappingV2(input: ApplyV2Input): ApplyV2Output {
   const unknown = new Set<string>();
   const seen = new Set<string>();
 
+  let blockingIssueCount = 0;
   const pushIssue = (issue: ImportIssue) => {
+    if (isBlockingIssue(issue)) blockingIssueCount += 1;
     if (issues.length < MAX_ISSUES) issues.push(issue);
   };
 
@@ -214,6 +221,12 @@ export function applyMappingV2(input: ApplyV2Input): ApplyV2Output {
       const blank = text === "" && cell.value === null;
       const halfDay = text.match(/HD\s*=\s*(\d+(?:\.\d+)?)/i);
       const halfMinutes = halfDay ? Number(halfDay[1]) : null;
+      if (halfMinutes != null && (!Number.isFinite(halfMinutes) || halfMinutes > 1440)) {
+        pushIssue({ row: rowIndex + 1, column: column.index, code, kind: "implausible_hours",
+          message: `"${text}" exceeds 24 hours. Correct the half-day annotation.` });
+        continue;
+      }
+
 
       if (mapping.mode === "days") {
         if (blank) continue;
@@ -246,13 +259,13 @@ export function applyMappingV2(input: ApplyV2Input): ApplyV2Output {
         }
 
         const hours = unitFor(column.index) === "minutes" ? cell.value / 60 : cell.value;
-        if (hours > 24) {
+        if (!Number.isFinite(hours) || hours < 0 || hours > 24) {
           pushIssue({
             row: rowIndex + 1,
             column: column.index,
             code,
             kind: "implausible_hours",
-            message: `${hours.toFixed(2)} h on ${column.date} exceeds a day. Check the unit.`,
+            message: `${hours.toFixed(2)} h on ${column.date} must be between 0 and 24. Check the value and unit.`,
           });
         }
 
@@ -267,6 +280,14 @@ export function applyMappingV2(input: ApplyV2Input): ApplyV2Output {
       }
 
       const complete = completeHours(employeeId, column.date);
+      const minutes = halfMinutes ?? (cell.value == null ? null : unitFor(column.index) === "minutes" ? cell.value : cell.value * 60);
+      if (minutes != null && (!Number.isFinite(minutes) || minutes < 0 || (complete > 0 && minutes > complete * 60))) {
+        pushIssue({ row: rowIndex + 1, column: column.index, code, kind: "implausible_hours",
+          message: `Lateness on ${column.date} must be between zero and the scheduled workday. Check the value and unit.` });
+        continue;
+      }
+      if (complete <= 0 && minutes === 0) continue;
+
       if (blank) {
         if (complete > 0) {
           days.push({ employeeId, workDate: column.date, hours: round2(complete), lateMinutes: 0, sourceValue: "" });
@@ -340,7 +361,12 @@ export function applyMappingV2(input: ApplyV2Input): ApplyV2Output {
       let bucketHours = 0;
       for (const columnIndex of bucketColumns(value)) {
         const cell = row[columnIndex];
-        if (!cell || cell.value === null || cell.value <= 0) continue;
+        if (!cell || (!cell.text && cell.value === null)) continue;
+        if (cell.value === null || !Number.isFinite(cell.value) || cell.value < 0) {
+          pushIssue({ row: rowIndex + 1, column: columnIndex, code, kind: "non_numeric",
+            message: `Premium ${bucketCode} must contain a non-negative number of hours.` });
+          continue;
+        }
         bucketHours += cell.value;
       }
       if (bucketHours <= 0) continue;
@@ -352,9 +378,12 @@ export function applyMappingV2(input: ApplyV2Input): ApplyV2Output {
 
     if (mapping.periodLate) {
       const cell = row[mapping.periodLate.index];
-      if (cell && cell.value !== null) {
-        const minutes = mapping.periodLate.unit === "minutes" ? cell.value : cell.value * 60;
-        totals.set(employeeId, Math.round(minutes));
+      if (cell && (cell.text || cell.value !== null)) {
+        const minutes = cell.value == null ? NaN : mapping.periodLate.unit === "minutes" ? cell.value : cell.value * 60;
+        if (!Number.isFinite(minutes) || minutes < 0 || minutes > 31 * 24 * 60) {
+          pushIssue({ row: rowIndex + 1, column: mapping.periodLate.index, code, kind: "non_numeric",
+            message: "Period lateness must contain a valid non-negative number. Check the value and unit." });
+        } else totals.set(employeeId, Math.round(minutes));
       }
     }
   }
@@ -365,6 +394,7 @@ export function applyMappingV2(input: ApplyV2Input): ApplyV2Output {
     totals: [...totals.entries()].map(([employeeId, minutes]) => ({ employeeId, minutes })),
     issues,
     unknownCodes: [...unknown].sort(),
+    blockingIssueCount,
     matchedEmployees,
     rowsRead,
   };
