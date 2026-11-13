@@ -9,6 +9,9 @@ import {
   type MappingV2,
   type V2Unit,
 } from "@/lib/import/apply-v2";
+import { useFormStatus } from "react-dom";
+import { validateMappingV2 } from "@/lib/import/review";
+import type { Sheet } from "@/lib/import/types";
 import { confirmImport } from "../actions";
 
 type Employee = { id: string; employeeCode: string; lastName: string; firstName: string };
@@ -55,39 +58,46 @@ function normalizeBuckets(buckets: MappingV2["buckets"]): Record<string, number[
 
 export function MappingGrid({
   runId,
-  grid,
+  previousImports,
+  payrollApproved,
+  sheet,
   detected,
   employees,
-  unknownCodes,
+  externalIds,
+  schedules,
+  canWrite,
   coverageStart,
   coverageEnd,
   profileName,
   fileName,
   periodLabel,
-  isNew,
-  detectMs,
   error,
 }: {
   runId: string;
-  grid: string[][];
+  previousImports: Array<{ id: string; fileName: string }>;
+  payrollApproved: boolean;
+  sheet: Sheet;
   detected: MappingV2;
   employees: Employee[];
-  unknownCodes: Array<{ code: string; name: string }>;
+  externalIds: Array<{ code: string; employeeId: string }>;
+  schedules: Record<string, Record<number, number>>;
+  canWrite: boolean;
   coverageStart: string;
   coverageEnd: string;
   profileName: string;
   fileName: string;
   periodLabel: string;
-  isNew: boolean;
-  detectMs: number;
   error?: string;
 }) {
-  const bootMs = Math.max(350, Math.min(2000, detectMs || 700));
-  const [booting, setBooting] = useState(isNew);
+  const grid = useMemo(() => sheet.rows.map((row) => row.map((cell) => cell.text)), [sheet]);
+  const [replacePrevious, setReplacePrevious] = useState(false);
+  const [bindings, setBindings] = useState<Record<string, string>>({});
   const [premiumOpen, setPremiumOpen] = useState(false);
   const [selection, setSelection] = useState<Selection | null>(null);
   const [dragging, setDragging] = useState(false);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const menuTrigger = useRef<HTMLElement | null>(null);
   const pointer = useRef({ x: 0, y: 0 });
   const [dataStart, setDataStart] = useState(detected.dataStartRow);
   const [mode, setMode] = useState<ImportMode>(detected.mode);
@@ -104,18 +114,17 @@ export function MappingGrid({
   const [reviewOpen, setReviewOpen] = useState(false);
   const [scrollTop, setScrollTop] = useState(0);
 
+
   useEffect(() => {
-    if (!isNew) return;
-    const timer = window.setTimeout(() => setBooting(false), bootMs);
-    window.history.replaceState(null, "", window.location.pathname);
-    return () => window.clearTimeout(timer);
-  }, [isNew, bootMs]);
+    if (menu) menuRef.current?.querySelector("button")?.focus();
+  }, [menu]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setSelection(null);
         setMenu(null);
+        menuTrigger.current?.focus();
       }
     };
     const onMove = (event: MouseEvent) => {
@@ -315,35 +324,23 @@ export function MappingGrid({
     [detected, mode, dataStart, assign, rangeStart, rangeEnd, units, periodLateUnit],
   );
 
+  const mappingProblem = validateMappingV2(mapping, sheet);
+  const basePreview = useMemo(() => {
+    if (mappingProblem) return null;
+    return applyMappingV2({ sheet, mapping, period: { coverageStart, coverageEnd }, employees, externalIds, schedules });
+  }, [sheet, mapping, mappingProblem, coverageStart, coverageEnd, employees, externalIds, schedules]);
+  const unknownCodes = (basePreview?.unknownCodes ?? []).map((code) => {
+    const issue = basePreview?.issues.find((entry) => entry.kind === "unknown_employee" && entry.code === code);
+    const name = issue && mapping.employeeName != null ? sheet.rows[issue.row - 1]?.[mapping.employeeName]?.text ?? "" : "";
+    return { code, name };
+  });
+  const reviewedAliases = unknownCodes.flatMap(({ code }) => bindings[code] ? [{ code, employeeId: bindings[code]! }] : []);
   const preview = useMemo(() => {
-    try {
-      const sheet = {
-        name: detected.sheetName,
-        rows: grid.slice(0, rowCount).map((row) =>
-          Array.from({ length: colCount }, (_, index) => {
-            const text = row[index] ?? "";
-            return { text, value: /^-?\d+(\.\d+)?$/.test(text) ? Number(text) : null };
-          }),
-        ),
-      };
-      const result = applyMappingV2({
-        sheet,
-        mapping,
-        period: { coverageStart, coverageEnd },
-        employees,
-        externalIds: [],
-        schedules: {},
-      });
-      return {
-        ...result,
-        // The browser has no schedules, so it cannot know whether one is really
-        // missing. The server import reports the real missing_schedule issues.
-        issues: result.issues.filter((issue) => issue.kind !== "missing_schedule"),
-      };
-    } catch {
-      return null;
-    }
-  }, [grid, rowCount, colCount, detected.sheetName, mapping, coverageStart, coverageEnd, employees]);
+    if (mappingProblem) return null;
+    const reviewed = (basePreview?.unknownCodes ?? []).flatMap((code) => bindings[code] ? [{ code, employeeId: bindings[code]! }] : []);
+    return applyMappingV2({ sheet, mapping, period: { coverageStart, coverageEnd }, employees,
+      externalIds: [...externalIds, ...reviewed], schedules });
+  }, [sheet, mapping, mappingProblem, coverageStart, coverageEnd, employees, externalIds, schedules, bindings, basePreview]);
 
   const reviewRows = useMemo(() => {
     const summary = new Map<string, { days: number; hours: number; late: number }>();
@@ -355,6 +352,10 @@ export function MappingGrid({
       entry.hours += day.hours;
       entry.late += day.lateMinutes;
       summary.set(day.employeeId, entry);
+    }
+    for (const total of preview?.totals ?? []) {
+      const entry = summary.get(total.employeeId);
+      if (entry) entry.late += total.minutes;
     }
     return order.map((id) => ({
       id,
@@ -369,26 +370,13 @@ export function MappingGrid({
   const bottomPad = Math.max(0, (rowCount - endRow) * ROW_HEIGHT);
   const visible = Array.from({ length: Math.max(0, endRow - startRow) }, (_, offset) => startRow + offset);
 
-  const ready = assign.code != null && rangeStart != null && rangeEnd != null && preview != null;
+  const ready = !mappingProblem && preview != null;
+  const canImport = canWrite && !payrollApproved && (!previousImports.length || replacePrevious) && ready && preview.blockingIssueCount === 0 && preview.days.length > 0;
 
   return (
-    <div className="flex h-screen flex-col bg-paper font-instrument text-ink">
-      {booting ? (
-        <div className="fixed inset-0 z-[60] flex flex-col items-center justify-center bg-paper">
-          <span className="flex items-center gap-2 text-[14.5px] font-bold tracking-[-0.01em]">
-            <span className="h-2 w-2 rounded-full bg-accent" aria-hidden="true" />
-            ECE
-          </span>
-          <p className="mt-8 text-[11.5px] font-semibold uppercase tracking-[0.12em] text-muted">Step 1 of 3 · Detect</p>
-          <h2 className="mt-3 max-w-[80vw] truncate font-serif text-[clamp(1.8rem,4vw,2.6rem)] tracking-[-0.02em]">{fileName}</h2>
-          <p className="mt-2 text-[13px] text-ink-2">{rowCount} rows · {colCount} columns</p>
-          <div className="mt-8 h-[2px] w-[240px] overflow-hidden rounded-full bg-rule">
-            <div className="h-full rounded-full bg-accent" style={{ animation: `boot-line ${bootMs}ms cubic-bezier(0.16,1,0.3,1) forwards` }} />
-          </div>
-        </div>
-      ) : null}
+    <div className="flex h-dvh flex-col bg-paper font-instrument text-ink">
 
-      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-rule px-4">
+      <header className="flex min-h-14 shrink-0 flex-wrap items-center gap-3 border-b border-rule px-4 py-2">
         <Link href="/payroll/time-report" aria-label="Back to time report" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-rule-strong text-muted transition-colors duration-150 hover:text-ink">
           ←
         </Link>
@@ -443,11 +431,11 @@ export function MappingGrid({
         <div className="h-[2px] flex-1 overflow-hidden rounded-full bg-rule">
           <div
             className="h-full rounded-full bg-accent transition-[width] duration-300"
-            style={{ width: `${((booting ? 1 : reviewOpen ? 3 : 2) / 3) * 100}%` }}
+            style={{ width: `${((reviewOpen ? 2 : 1) / 2) * 100}%` }}
           />
         </div>
         <span className="shrink-0 text-[11.5px] text-muted">
-          Step {booting ? 1 : reviewOpen ? 3 : 2} of 3 · {booting ? "Detect" : reviewOpen ? "Review" : "Map"}
+          Step {reviewOpen ? 2 : 1} of 2 · {reviewOpen ? "Review attendance" : "Check columns"}
         </span>
       </div>
 
@@ -457,19 +445,19 @@ export function MappingGrid({
         </div>
       ) : null}
 
-      <form action={confirmImport} className="flex min-h-0 flex-1 flex-col">
+      {mappingProblem ? <p role="status" className="border-b border-rule bg-surface-2 px-4 py-2 text-[13px] text-warn">{mappingProblem}</p> : null}
+      <form action={confirmImport} onSubmit={(event) => { if (!reviewOpen || !canImport) event.preventDefault(); }} className="flex min-h-0 flex-1 flex-col">
         <input type="hidden" name="runId" value={runId} />
         <input type="hidden" name="mode" value={mode} />
+        <input type="hidden" name="dataStartRow" value={dataStart} />
         <input type="hidden" name="codeColumn" value={assign.code ?? ""} />
         <input type="hidden" name="nameColumn" value={assign.name ?? ""} />
         <input type="hidden" name="dayStart" value={rangeStart ?? ""} />
         <input type="hidden" name="dayEnd" value={rangeEnd ?? ""} />
         <input type="hidden" name="periodLateColumn" value={assign.periodLate ?? ""} />
         <input type="hidden" name="periodLateUnit" value={periodLateUnit} />
-        <input type="hidden" name="unknownCount" value={unknownCodes.length} />
-        {unknownCodes.map((entry, index) => (
-          <input key={entry.code} type="hidden" name={`unknownCode-${index}`} value={entry.code} />
-        ))}
+        <input type="hidden" name="previousImports" value={JSON.stringify(previousImports.map((run) => run.id).sort())} />
+        <input type="hidden" name="aliases" value={JSON.stringify(reviewedAliases)} />
         {rangeColumns.map((index) => (
           <input key={`unit-${index}`} type="hidden" name={`unit-${index}`} value={units[String(index)] ?? defaultUnit} />
         ))}
@@ -489,9 +477,8 @@ export function MappingGrid({
               >
                 ← Back to grid
               </button>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">Review mapping</p>
-              <h1 className="mt-3 font-serif text-[clamp(2rem,4vw,2.8rem)] leading-[1.05] tracking-[-0.03em]">
-                {detected.sheetName}
+              <h1 className="mt-3 font-serif text-[32px] sm:text-[36px] leading-[1.05] tracking-[-0.03em]">
+                Review attendance
               </h1>
               <div className="mt-6 grid grid-cols-2 gap-px border border-rule bg-rule sm:grid-cols-4">
                 {[
@@ -508,7 +495,7 @@ export function MappingGrid({
               </div>
 
               <p className="mt-3 text-[11.5px] text-muted">
-                Preview uses an eight-hour fallback schedule; the import uses each employee's real schedule.
+                Uses saved employee matches and assigned work schedules. Nothing is saved until you confirm.
               </p>
 
               {preview?.issues.some((issue) => issue.kind === "day_mismatch") ? (
@@ -519,7 +506,7 @@ export function MappingGrid({
                 </p>
               ) : null}
 
-              <div className="mt-6 rounded-[14px] border border-rule">
+              <div className="scroll-x mt-6 border-y border-rule">
                 <div className="flex items-center justify-between border-b border-rule px-4 py-2.5">
                   <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">First employees</span>
                   <span className="text-[10.5px] text-muted">totals across the mapped dates</span>
@@ -541,6 +528,7 @@ export function MappingGrid({
                       </tr>
                     </thead>
                     <tbody>
+                      {reviewRows.length === 0 ? <tr><td colSpan={5} className="px-3 py-5 text-[13px] text-muted">No matched attendance yet. Match employee codes below or check the column settings.</td></tr> : null}
                       {reviewRows.slice(0, 10).map((row) => (
                         <tr key={row.id} className="border-b border-rule last:border-b-0">
                           <td className="figure px-3 py-2 text-[11.5px] text-muted">{row.employee?.employeeCode ?? "—"}</td>
@@ -583,15 +571,15 @@ export function MappingGrid({
               ) : null}
 
               {unknownCodes.length > 0 ? (
-                <details className="mt-4 rounded-[14px] border border-[#e8c98a] bg-[#fbf3db] px-4 py-3">
-                  <summary className="cursor-pointer text-[12.5px] font-semibold text-[#956400] marker:hidden">Unbound employee codes · {unknownCodes.length}</summary>
+                <details open className="mt-4 rounded-[14px] border border-[#e8c98a] bg-[#fbf3db] px-4 py-3">
+                  <summary className="cursor-pointer text-[12.5px] font-semibold text-[#956400] marker:hidden">Match employee codes · {unknownCodes.length}</summary>
                   <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                    {unknownCodes.slice(0, 60).map((entry, index) => (
-                      <div key={entry.code} className="flex items-center gap-2">
+                    {unknownCodes.map((entry) => (
+                      <div key={entry.code} className="flex min-w-0 flex-wrap items-center gap-2">
                         <span className="figure w-[96px] shrink-0 truncate text-[12px]" title={entry.code}>{entry.code}</span>
                         <span className="w-[110px] shrink-0 truncate text-[12px] text-muted" title={entry.name}>{entry.name || "—"}</span>
-                        <select name={`alias-${index}`} defaultValue="" className="h-8 w-full rounded-[10px] border border-rule-strong bg-surface px-2 text-[12px]">
-                          <option value="">Leave unbound</option>
+                        <select aria-label={`Match employee ${entry.code}`} value={bindings[entry.code] ?? ""} onChange={(event) => setBindings((current) => ({ ...current, [entry.code]: event.target.value }))} className="h-9 w-full rounded-[10px] border border-rule-strong bg-surface px-2 text-[12px]">
+                          <option value="">Choose employee…</option>
                           {employees.map((employee) => (
                             <option key={employee.id} value={employee.id}>{employee.employeeCode} · {employee.lastName}, {employee.firstName}</option>
                           ))}
@@ -607,25 +595,63 @@ export function MappingGrid({
                   <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-warn">{preview.issues.length} issue{preview.issues.length === 1 ? "" : "s"}</p>
                   <ul className="mt-2 space-y-1.5">
                     {preview.issues.slice(0, 12).map((issue, index) => (
-                      <li key={index} className="text-[12px] text-ink-2"><span className="figure mr-2 text-[11px] text-muted">r{issue.row}</span>{issue.message}</li>
+                      <li key={index} className="break-words text-[13px] text-ink-2"><span className="figure mr-2 text-[11px] text-muted">Row {issue.row}{issue.column == null ? "" : ` · ${colLetter(issue.column)}`}</span>{issue.message}</li>
                     ))}
                   </ul>
                 </div>
               ) : null}
 
+              {payrollApproved ? <p role="alert" className="mt-5 rounded-[10px] border border-rule bg-surface-2 p-4 text-[13px] text-ink-2">Payroll for this cutoff is approved. Attendance can no longer be changed.</p> : previousImports.length > 0 ? (
+                <div className="mt-6 border-y border-rule py-4">
+                  <p className="text-[13px] font-semibold">Attendance already exists for this cutoff</p>
+                  <p className="mt-1 break-words text-[12.5px] text-muted">{previousImports.map((run) => run.fileName).join(", ")} will remain in history. Recalculate any draft payroll after replacing attendance.</p>
+                  <label className="mt-3 flex items-start gap-2 text-[13px]">
+                    <input type="checkbox" name="replacePrevious" checked={replacePrevious} onChange={(event) => setReplacePrevious(event.target.checked)} className="mt-1 h-4 w-4 accent-accent" />
+                    Replace the previous attendance import for this cutoff
+                  </label>
+                </div>
+              ) : null}
+              {!canImport && !payrollApproved && (!previousImports.length || replacePrevious) ? (
+                <p role="status" className="mt-5 text-[13px] text-warn">
+                  {!canWrite ? "Your role cannot import time reports." : preview?.blockingIssueCount
+                    ? `Resolve ${preview.blockingIssueCount} issue${preview.blockingIssueCount === 1 ? "" : "s"} before importing.`
+                    : "No attendance days to import. Check the mapped columns and first data row."}
+                </p>
+              ) : null}
               <div className="mt-8 flex flex-wrap items-end gap-3 border-t border-rule pt-5">
                 <div className="min-w-[240px] flex-1">
                   <label htmlFor="profileName" className="block text-[11px] font-semibold uppercase tracking-[0.1em] text-muted">Save profile as</label>
                   <input id="profileName" name="profileName" defaultValue={profileName} className="mt-1.5 h-9 w-full rounded-[10px] border border-rule-strong bg-surface px-2 text-[12.5px]" />
                 </div>
-                <button type="submit" disabled={!ready} className="h-10 rounded-full bg-accent px-5 text-[13px] font-semibold text-white transition-colors duration-150 hover:brightness-95 disabled:opacity-40">
-                  Confirm mapping and import
-                </button>
+                <ConfirmButton disabled={!canImport} />
               </div>
             </div>
           </div>
         ) : (
-          <div className="onboard-step flex min-h-0 flex-1 flex-col">
+          <div className="flex min-h-0 flex-1 flex-col">
+            <details className="shrink-0 border-b border-rule px-4 py-3">
+              <summary className="cursor-pointer text-[13px] font-semibold">Column settings</summary>
+              <p className="mt-2 text-[12.5px] text-muted">Use these fields or select columns in the sheet to change assignments.</p>
+              <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-5">
+                {([
+                  ["Employee code", "code"], ["Employee name", "name"],
+                  ["First day column", "dayStart"], ["Last day column", "dayEnd"],
+                ] as const).map(([label, field]) => <label key={field} className="text-[12px] font-medium">
+                  {label}
+                  <select aria-label={label} value={assign[field] ?? ""}
+                    onChange={(event) => setAssign((current) => ({ ...current, [field]: event.target.value === "" ? null : Number(event.target.value) }))}
+                    className="mt-1 h-9 w-full rounded-[10px] border border-rule-strong bg-surface px-2 text-[13px]">
+                    <option value="">Not mapped</option>
+                    {columns.map((column) => <option key={column} value={column}>{colLetter(column)} · {grid[detected.headerRow]?.[column] || "Column"}</option>)}
+                  </select>
+                </label>)}
+                <label className="text-[12px] font-medium">First data row
+                  <input aria-label="First data row" type="number" min={detected.headerRow + 2} max={rowCount} value={dataStart + 1}
+                    onChange={(event) => setDataStart(Number(event.target.value) - 1)}
+                    className="mt-1 h-9 w-full rounded-[10px] border border-rule-strong bg-surface px-2 text-[13px]" />
+                </label>
+              </div>
+            </details>
             <div className="min-h-0 flex-1 p-4">
               <div className="h-full overflow-auto rounded-[14px] border border-rule bg-surface select-none" onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}>
                 <table className="border-collapse text-left" style={{ width: 44 + colCount * COL_WIDTH }}>
@@ -640,6 +666,16 @@ export function MappingGrid({
                             key={column}
                             scope="col"
                             style={{ width: COL_WIDTH }}
+                            tabIndex={0}
+                            aria-label={`Map column ${colLetter(column)}`}
+                            onKeyDown={(event) => {
+                              if (event.key !== "Enter" && event.key !== " ") return;
+                              event.preventDefault();
+                              menuTrigger.current = event.currentTarget;
+                              const rect = event.currentTarget.getBoundingClientRect();
+                              setSelection({ kind: "column", start: column, end: column });
+                              openMenuAt(rect.left, rect.bottom);
+                            }}
                             onMouseDown={(event) => {
                               event.preventDefault();
                               pointer.current = { x: event.clientX, y: event.clientY };
@@ -681,6 +717,15 @@ export function MappingGrid({
                           style={{ height: ROW_HEIGHT }}
                         >
                           <td
+                            role="button" tabIndex={0} aria-label={`Choose row ${rowIndex + 1}`}
+                            onKeyDown={(event) => {
+                              if (event.key !== "Enter" && event.key !== " ") return;
+                              event.preventDefault();
+                              menuTrigger.current = event.currentTarget;
+                              const rect = event.currentTarget.getBoundingClientRect();
+                              setSelection({ kind: "row", start: rowIndex, end: rowIndex });
+                              openMenuAt(rect.right, rect.top);
+                            }}
                             onMouseDown={(event) => {
                               pointer.current = { x: event.clientX, y: event.clientY };
                               setSelection({ kind: "row", start: rowIndex, end: rowIndex });
@@ -745,7 +790,7 @@ export function MappingGrid({
       {menu && selection && !reviewOpen ? (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setMenu(null)} />
-          <div className="palette-in fixed z-50 w-[290px] rounded-[14px] border border-rule bg-surface p-3 shadow-lg" style={{ left: menu.x, top: menu.y }}>
+          <div ref={menuRef} role="dialog" aria-label="Column assignment" className="palette-in fixed z-50 w-[290px] rounded-[14px] border border-rule bg-surface p-3 shadow-lg" style={{ left: menu.x, top: menu.y }}>
             <p className="text-[10.5px] font-semibold uppercase tracking-[0.1em] text-muted">
               {selection.kind === "row"
                 ? `Row ${selection.start + 1}`
@@ -820,4 +865,11 @@ export function MappingGrid({
       ) : null}
     </div>
   );
+}
+
+function ConfirmButton({ disabled }: { disabled: boolean }) {
+  const { pending } = useFormStatus();
+  return <button type="submit" disabled={disabled || pending} className="h-10 rounded-full bg-accent px-5 text-[13px] font-semibold text-white transition-colors duration-150 hover:brightness-95 disabled:opacity-40">
+    {pending ? "Importing attendance…" : "Confirm and import"}
+  </button>;
 }

@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import {
   attendanceBuckets,
@@ -301,6 +301,14 @@ export async function approveRun(formData: FormData) {
   };
 
   await db.transaction(async (tx) => {
+    // Serialize with attendance replacement, then validate the source again.
+    await tx.execute(sql`select id from payroll_periods where id = ${run.periodId} for update`);
+    const sourceId = (run.assumptions as { attendanceRun?: string } | null)?.attendanceRun;
+    const [currentSource] = sourceId ? await tx.select({ status: importRuns.status }).from(importRuns)
+      .where(and(eq(importRuns.id, sourceId), eq(importRuns.tenantId, tenant.id))) : [];
+    if (sourceId && currentSource?.status !== "imported") {
+      redirect(`/payroll/computation/${runId}?error=Attendance+was+replaced.+Recalculate+payroll+before+approval`);
+    }
     await tx
       .update(payRuns)
       .set({

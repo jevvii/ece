@@ -6,12 +6,13 @@ import { importProfiles, importRuns, payrollCalendars, payrollPeriods } from "@/
 import { requireWorkspace } from "@/lib/auth";
 import { formatRange } from "@/lib/periods";
 import { getActiveCalendar } from "@/lib/workspace";
-import { uploadTimeReport } from "./actions";
+import { TimeReportUpload } from "./upload-form";
 
 const statusLabel: Record<string, string> = {
   mapping: "Mapping",
   review: "Needs review",
   imported: "Imported",
+  superseded: "Replaced",
   failed: "Failed",
 };
 
@@ -19,6 +20,7 @@ const statusTone: Record<string, string> = {
   mapping: "text-ink-2",
   review: "text-warn",
   imported: "text-accent",
+  superseded: "text-muted",
   failed: "text-[#9f2f2d]",
 };
 
@@ -57,9 +59,7 @@ export default async function TimeReportPage({
       .orderBy(desc(importProfiles.createdAt)),
   ]);
 
-  const upcoming = periods
-    .filter((period) => period.coverageEnd >= today)
-    .slice(0, 12);
+  const currentPeriod = periods.find((period) => period.coverageStart <= today && period.coverageEnd >= today);
 
   return (
     <>
@@ -71,31 +71,25 @@ export default async function TimeReportPage({
         </Link>
 
         <div className="mt-6">
-          <p className="flex items-center gap-2 text-[12px] font-semibold uppercase tracking-[0.12em] text-muted">
-            <span className="h-1.5 w-1.5 rounded-full bg-accent" aria-hidden="true" />
-            Time report · import and review
-          </p>
-          <h1 className="mt-3 font-serif text-[34px] leading-[1.05] tracking-[-0.03em] sm:text-[40px]">
-            Time Report
+          <h1 className="font-serif text-[34px] leading-[1.05] tracking-[-0.03em] sm:text-[40px]">
+            Import time reports
           </h1>
           <p className="mt-3 max-w-[62ch] text-[13.5px] leading-[1.6] text-ink-2">
-            Upload the client&apos;s attendance export. The parser proposes a column mapping from the
-            header, you confirm it once, and it runs the same way every cutoff after that.
+            Choose a cutoff and upload attendance. Check the preview, match employees, then confirm the import.
           </p>
         </div>
 
         {error ? (
           <div role="alert" className="mt-6 rounded-[10px] border border-[#9f2f2d]/25 bg-[#fdebec] px-4 py-3 text-[13px] text-[#7c2523]">
-            {error === "not-allowed" ? "Your role cannot import time reports." : decodeURIComponent(error)}
+            {error === "not-allowed" ? "Your role cannot import time reports." : error}
           </div>
         ) : null}
 
-        <div className="mt-8 grid items-start gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+        <div className="mt-8 grid items-start gap-6 lg:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
           <section className="rounded-[14px] border border-rule bg-surface p-6">
-            <h2 className="text-[12.5px] font-semibold uppercase tracking-[0.08em]">New import</h2>
+            <h2 className="text-[17px] font-semibold">Upload attendance</h2>
             <p className="mt-1.5 text-[12.5px] text-muted">
-              ODS and CSV in this build. The file is stored against the company and never shared
-              across tenants.
+              Your file opens as a preview. Attendance is saved after you confirm.
             </p>
 
             {!calendar ? (
@@ -103,68 +97,16 @@ export default async function TimeReportPage({
                 This company has no cutoff calendar yet. Finish company setup first.
               </p>
             ) : (
-              <form action={uploadTimeReport} className="mt-5">
-                <label htmlFor="file" className="block text-[11px] font-semibold uppercase tracking-[0.1em] text-muted">
-                  Attendance export
-                </label>
-                <input
-                  id="file"
-                  name="file"
-                  type="file"
-                  accept=".ods,.csv"
-                  required
-                  className="mt-2 block w-full cursor-pointer rounded-[14px] border border-dashed border-rule-strong bg-surface-2/50 px-3 py-4 text-[12.5px] text-muted transition-colors hover:border-accent/50 file:mr-3 file:rounded-full file:border file:border-rule-strong file:bg-surface file:px-3 file:py-1.5 file:text-[12.5px] file:font-semibold file:text-ink-2"
-                />
-
-                <label htmlFor="periodId" className="mt-5 block text-[11px] font-semibold uppercase tracking-[0.1em] text-muted">
-                  Cutoff covered by this file
-                </label>
-                <select id="periodId" name="periodId" required className="mt-2 h-10 w-full rounded-[10px] border border-rule-strong bg-surface px-2 text-[13.5px]">
-                  {upcoming.map((period) => (
-                    <option key={period.id} value={period.id}>
-                      {period.cycleLabel} · cutoff {period.cutoffNo} · {formatRange(period.coverageStart, period.coverageEnd)}
-                    </option>
-                  ))}
-                </select>
-
-                <button
-                  type="submit"
-                  disabled={!canWrite}
-                  className="mt-6 h-10 w-full rounded-full bg-accent px-5 text-[13px] font-semibold text-white transition-colors hover:brightness-95 disabled:opacity-40"
-                >
-                  Upload and detect columns
-                </button>
-              </form>
+              <TimeReportUpload
+                periods={periods.map((period) => ({ id: period.id, label: `${period.cycleLabel} · cutoff ${period.cutoffNo} · ${formatRange(period.coverageStart, period.coverageEnd)}` }))}
+                defaultPeriodId={currentPeriod?.id ?? ""}
+                canWrite={canWrite}
+              />
             )}
           </section>
 
-          <section className="rounded-[14px] border border-rule bg-surface">
-            <div className="border-b border-rule px-5 py-3">
-              <h2 className="text-[12.5px] font-semibold uppercase tracking-[0.08em]">Saved profiles</h2>
-            </div>
-            {profiles.length === 0 ? (
-              <p className="px-5 py-6 text-[12.5px] text-muted">
-                No profiles yet. The first confirmed import creates one.
-              </p>
-            ) : (
-              <ul>
-                {profiles.map((profile) => (
-                  <li key={profile.id} className="flex items-center justify-between gap-3 border-b border-rule px-5 py-3 last:border-b-0">
-                    <span className="min-w-0">
-                      <span className="block truncate text-[13px]">{profile.name}</span>
-                      <span className="figure block text-[11.5px] text-muted">
-                        v{profile.version} · {profile.sourceSignature}
-                      </span>
-                    </span>
-                    <span className="text-[11px] uppercase tracking-[0.08em] text-muted">Saved</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-        </div>
 
-        <section className="mt-6 rounded-[14px] border border-rule bg-surface">
+        <section className="min-w-0 rounded-[14px] border border-rule bg-surface">
           <div className="flex items-center justify-between border-b border-rule px-5 py-3">
             <h2 className="text-[12.5px] font-semibold uppercase tracking-[0.08em]">Recent imports</h2>
             <span className="figure text-[12px] text-muted">{runs.length}</span>
@@ -210,6 +152,34 @@ export default async function TimeReportPage({
             </div>
           )}
         </section>
+        </div>
+
+
+
+          <section className="mt-6 rounded-[14px] border border-rule bg-surface">
+            <div className="border-b border-rule px-5 py-3">
+              <h2 className="text-[12.5px] font-semibold uppercase tracking-[0.08em]">Saved profiles</h2>
+            </div>
+            {profiles.length === 0 ? (
+              <p className="px-5 py-6 text-[12.5px] text-muted">
+                Confirming an import saves its column assignments here for reference.
+              </p>
+            ) : (
+              <ul>
+                {profiles.map((profile) => (
+                  <li key={profile.id} className="flex items-center justify-between gap-3 border-b border-rule px-5 py-3 last:border-b-0">
+                    <span className="min-w-0">
+                      <span className="block truncate text-[13px]">{profile.name}</span>
+                      <span className="figure block text-[11.5px] text-muted">
+                        Column assignments saved
+                      </span>
+                    </span>
+                    <span className="text-[11px] uppercase tracking-[0.08em] text-muted">Saved</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
       </main>
 
       <WorkspaceFooter />

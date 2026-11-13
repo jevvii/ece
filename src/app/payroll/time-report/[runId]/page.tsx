@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ne, sql } from "drizzle-orm";
 import { WorkspaceFooter, WorkspaceHeader } from "@/components/workspace-header";
 import { db } from "@/db/client";
 import {
@@ -10,11 +10,12 @@ import {
   employees,
   importRuns,
   payrollPeriods,
+  payRuns,
 } from "@/db/schema";
 import { requireWorkspace } from "@/lib/auth";
-import { parseCsv } from "@/lib/import/csv";
+import { loadImportContext } from "@/lib/import/context";
+import { parseTimeReportFile } from "@/lib/import/parse-file";
 import { detectMappingV2, type MappingV2 } from "@/lib/import/mapping-v2";
-import { parseOds } from "@/lib/import/ods";
 import { readUpload } from "@/lib/import/storage";
 import type { ImportIssue, Sheet } from "@/lib/import/types";
 import { formatRange } from "@/lib/periods";
@@ -55,11 +56,11 @@ export default async function TimeReportRunPage({
   searchParams,
 }: {
   params: Promise<{ runId: string }>;
-  searchParams: Promise<{ error?: string; new?: string; ms?: string }>;
+  searchParams: Promise<{ error?: string }>;
 }) {
   const { runId } = await params;
-  const { error, new: isNew, ms } = await searchParams;
-  const { tenant } = await requireWorkspace();
+  const { error } = await searchParams;
+  const { tenant, membership } = await requireWorkspace();
 
   const [run] = await db
     .select()
@@ -74,28 +75,14 @@ export default async function TimeReportRunPage({
     : [];
 
   const issues = (run.issues ?? []) as ImportIssue[];
-  const isImported = run.status === "imported";
+  const isImported = run.status === "imported" || run.status === "superseded";
   const storedMapping = run.mapping as unknown as MappingV2 & { version?: number };
-
-  const employeeRows = await db
-    .select({
-      id: employees.id,
-      employeeCode: employees.employeeCode,
-      lastName: employees.lastName,
-      firstName: employees.firstName,
-    })
-    .from(employees)
-    .where(eq(employees.tenantId, tenant.id))
-    .orderBy(asc(employees.employeeCode));
 
   let sheetData: Sheet | null = null;
   if (run.storageKey) {
     try {
       const bytes = await readUpload(run.storageKey);
-      sheetData =
-        run.fileKind === "ods"
-          ? parseOds(new Uint8Array(bytes))
-          : parseCsv(new TextDecoder().decode(bytes));
+      sheetData = parseTimeReportFile(new Uint8Array(bytes), run.fileName);
     } catch {
       sheetData = null;
     }
@@ -109,58 +96,37 @@ export default async function TimeReportRunPage({
         ? detectMappingV2(sheetData)
         : null;
 
-  // Trim to populated bounds so the grid never renders hundreds of empty cells.
-  let sheetGrid: string[][] = [];
-  if (sheetData) {
-    const rows = sheetData.rows.slice(0, 500);
-    let width = 0;
-    for (const row of rows) {
-      for (let index = row.length - 1; index >= 0; index -= 1) {
-        if ((row[index]?.text ?? "").trim() !== "") {
-          width = Math.max(width, index + 1);
-          break;
-        }
-      }
-    }
-    const capped = rows.map((row) =>
-      Array.from({ length: Math.min(width, 200) }, (_, index) => row[index]?.text ?? ""),
-    );
-    while (capped.length > 0 && (capped[capped.length - 1] ?? []).every((text) => text.trim() === "")) {
-      capped.pop();
-    }
-    sheetGrid = capped;
-  }
-
-  const unknownIssues = issues.filter((issue) => issue.kind === "unknown_employee");
-  const unknownCodes = [...new Set(unknownIssues.map((issue) => issue.code ?? ""))].filter(Boolean);
-  const unknownDetails = unknownCodes.map((code) => {
-    const issue = unknownIssues.find((candidate) => candidate.code === code);
-    const row = sheetData && issue ? sheetData.rows[issue.row - 1] : undefined;
-    const name = mapping?.employeeName != null && row ? (row[mapping.employeeName]?.text ?? "") : "";
-    return { code, name };
-  });
-
   // Mapping runs in its own full-viewport shell, modelled on onboarding.
   if (!isImported && mapping && sheetData) {
+    const [context, previousImports, payroll] = await Promise.all([
+      loadImportContext(tenant.id),
+      run.periodId ? db.select({ id: importRuns.id, fileName: importRuns.fileName }).from(importRuns)
+        .where(and(eq(importRuns.tenantId, tenant.id), eq(importRuns.periodId, run.periodId), eq(importRuns.status, "imported"), ne(importRuns.id, run.id)))
+        .orderBy(desc(importRuns.importedAt)) : Promise.resolve([]),
+      run.periodId ? db.select({ status: payRuns.status }).from(payRuns)
+        .where(and(eq(payRuns.tenantId, tenant.id), eq(payRuns.periodId, run.periodId))).limit(1) : Promise.resolve([]),
+    ]);
     return (
       <MappingGrid
         runId={run.id}
-        grid={sheetGrid}
+        previousImports={previousImports}
+        payrollApproved={payroll[0]?.status === "approved"}
+        sheet={sheetData}
         detected={mapping}
-        employees={employeeRows}
-        unknownCodes={unknownDetails}
+        employees={context.employees}
+        externalIds={context.externalIds}
+        schedules={context.schedules}
+        canWrite={membership.role === "company_admin" || membership.role === "payroll_officer"}
         coverageStart={period?.coverageStart ?? ""}
         coverageEnd={period?.coverageEnd ?? ""}
-        profileName={`${mapping.sheetName} · ${mapping.signature}`}
+        profileName={`${mapping.sheetName} columns`}
         fileName={run.fileName}
         periodLabel={
           period
             ? `${period.cycleLabel} · cutoff ${period.cutoffNo} · ${formatRange(period.coverageStart, period.coverageEnd)}`
             : "No cutoff attached"
         }
-        isNew={isNew === "1"}
-        detectMs={Number(ms ?? 0) || 0}
-        error={error ? decodeURIComponent(error) : undefined}
+        error={error}
       />
     );
   }
@@ -241,11 +207,7 @@ export default async function TimeReportRunPage({
 
         <div className="mt-6 flex flex-wrap items-end justify-between gap-6">
           <div>
-            <p className="flex items-center gap-2 text-[12px] font-semibold uppercase tracking-[0.12em] text-muted">
-              <span className="h-1.5 w-1.5 rounded-full bg-accent" aria-hidden="true" />
-              {run.fileKind.toUpperCase()} · {mapping?.sheetName ?? "mapping unavailable"}
-            </p>
-            <h1 className="mt-4 font-serif text-[clamp(2.25rem,4.5vw,3rem)] leading-[1.04] tracking-[-0.03em]">
+            <h1 className="font-serif text-[36px] leading-[1.04] tracking-[-0.03em]">
               Time report
             </h1>
             <p className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-ink-2">
@@ -262,7 +224,7 @@ export default async function TimeReportRunPage({
           <div className="text-left sm:text-right">
             <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-muted">Status</p>
             <p className={`mt-1 text-[12.5px] uppercase tracking-[0.08em] ${isImported ? "text-accent" : "text-warn"}`}>
-              {isImported ? "Imported" : run.status === "review" ? "Needs review" : "Mapping"}
+              {run.status === "superseded" ? "Replaced" : isImported ? "Imported" : run.status === "review" ? "Needs review" : "Mapping"}
             </p>
             <p className="figure mt-1 text-[12px] text-muted">
               {run.rowCount} rows · {dayRows.length} day records
@@ -272,10 +234,11 @@ export default async function TimeReportRunPage({
 
         {error ? (
           <div role="alert" className="mt-6 rounded-[10px] border border-[#9f2f2d]/25 bg-[#fdebec] px-4 py-3 text-[13px] text-[#7c2523]">
-            {decodeURIComponent(error)}
+            {error}
           </div>
         ) : null}
 
+        {run.status === "superseded" ? <p className="mt-6 border-y border-rule py-3 text-[13px] text-ink-2">A newer import is used for this cutoff. This report remains available in the import history.</p> : null}
         {!isImported ? (
           <div className="mt-7 rounded-[10px] border border-[#e8c98a] bg-[#fbf3db] px-4 py-3 text-[12.5px] text-[#7a5a14]">
             The uploaded file is no longer available, so this run cannot be mapped. Upload it again.
