@@ -80,15 +80,13 @@ function matchHeader(value: string): FieldKey {
 }
 
 function autoMap(header: string[]): FieldKey[] {
-  const mapping = header.map(matchHeader);
-  // A single name column wins over separate last/first columns.
-  if (mapping.includes("lastName") || mapping.includes("firstName")) {
-    const single = mapping.indexOf("employeeName");
-    if (single >= 0) {
-      mapping[single] = "employeeName";
-    }
-  }
-  return mapping;
+  const seen = new Set<FieldKey>();
+  return header.map((cell) => {
+    const field = matchHeader(cell);
+    if (field === "ignore" || seen.has(field)) return "ignore";
+    seen.add(field);
+    return field;
+  });
 }
 
 function findHeaderRow(rows: string[][]) {
@@ -108,55 +106,40 @@ const select =
   "h-9 w-full rounded-[10px] border border-rule-strong bg-surface px-2 text-[12.5px] outline-none focus:border-accent focus:ring-2 focus:ring-accent/15";
 
 export function EmployeeImport({
-  onRows,
-  canSetup,
+  onRows, onBusy, canSetup,
 }: {
   onRows: (rows: EmployeeDraft[]) => void;
+  onBusy: (busy: boolean) => void;
   canSetup: boolean;
 }) {
-  const [state, formAction, pending] = useActionState(parseEmployeeFileAction, initial);
   const [sheetIndex, setSheetIndex] = useState(0);
   const [headerRow, setHeaderRow] = useState(0);
   const [mapping, setMapping] = useState<FieldKey[]>([]);
   const [dateOrder, setDateOrder] = useState<DateOrder>("mdy");
-  const [added, setAdded] = useState<number | null>(null);
 
+  function configure(rows: string[][], header = findHeaderRow(rows)) {
+    setHeaderRow(header);
+    setMapping(autoMap(rows[header] ?? []));
+    setDateOrder(inferDateOrder(rows.slice(header + 1, header + 40).flat()));
+  }
+
+  const [state, formAction, pending] = useActionState(async (previous: ParseWorkbookState, formData: FormData) => {
+    try {
+      const result = await parseEmployeeFileAction(previous, formData);
+      setSheetIndex(0);
+      configure(result.sheets?.[0]?.rows ?? []);
+      return result;
+    } catch {
+      return { status: "error", error: "Could not read the file. Choose it again to retry." } satisfies ParseWorkbookState;
+    } finally {
+      onBusy(false);
+    }
+  }, initial);
   const sheets = state.status === "ok" ? state.sheets ?? [] : [];
   const sheet = sheets[sheetIndex];
 
-  useEffect(() => {
-    if (state.status !== "ok") return;
-    setSheetIndex(0);
-    setAdded(null);
-  }, [state]);
-
-  useEffect(() => {
-    if (!sheet) {
-      setMapping([]);
-      return;
-    }
-    setHeaderRow(findHeaderRow(sheet.rows));
-  }, [sheet]);
-
-  useEffect(() => {
-    if (!sheet) return;
-    setMapping(autoMap(sheet.rows[headerRow] ?? []));
-  }, [sheet, headerRow]);
-
-  useEffect(() => {
-    if (!sheet) return;
-    const samples: string[] = [];
-    for (const row of sheet.rows.slice(headerRow + 1, headerRow + 40)) {
-      for (const cell of row) {
-        if (/^\d{1,2}[/-]\d{1,2}[/-]\d{4}$/.test(cell.trim())) samples.push(cell);
-      }
-    }
-    setDateOrder(inferDateOrder(samples));
-  }, [sheet, headerRow]);
-
   const preview = useMemo(() => {
     if (!sheet) return [] as EmployeeDraft[];
-    const header = sheet.rows[headerRow] ?? [];
 
     return sheet.rows
       .slice(headerRow + 1)
@@ -193,45 +176,44 @@ export function EmployeeImport({
       !mapping.includes("lastName") &&
       !mapping.includes("firstName"));
 
-  return (
-    <details className="mt-3 rounded-[14px] border border-rule bg-surface-2 px-4 py-3">
-      <summary className="cursor-pointer text-[12.5px] font-semibold marker:hidden">
-        Import from a spreadsheet
-      </summary>
+  const mappedFields = mapping.filter((field) => field !== "ignore");
+  const duplicateMapping = new Set(mappedFields).size !== mappedFields.length;
+  useEffect(() => {
+    if (!pending) onRows(missingRequired || duplicateMapping ? [] : preview);
+  }, [preview, missingRequired, duplicateMapping, pending, onRows]);
 
-      <form action={formAction} className="mt-3 flex flex-wrap items-end gap-3">
-        <div className="min-w-[240px] flex-1">
-          <label htmlFor="employee-file" className="block text-[11px] font-semibold uppercase tracking-[0.1em] text-muted">
-            CSV, XLSX or ODS
-          </label>
-          <input
-            id="employee-file"
-            name="file"
-            type="file"
-            accept=".csv,.xlsx,.ods"
-            required
-            className="mt-1.5 block w-full text-[12.5px] file:mr-3 file:h-9 file:rounded-full file:border-0 file:bg-ink file:px-4 file:text-[12px] file:font-semibold file:text-white"
-          />
-        </div>
-        <button
-          type="submit"
+  return (
+    <section aria-label="Import employees" className="mt-4 border-y border-rule py-5">
+      <form action={formAction} onSubmit={() => { onRows([]); onBusy(true); }}>
+        <label htmlFor="employee-file" className="block text-[13px] font-semibold">Import a spreadsheet</label>
+        <p id="employee-file-help" className="mt-1 text-[12.5px] text-muted">
+          Choose a CSV, XLSX or ODS file to preview employees. Up to 5 MB.
+        </p>
+        <input
+          id="employee-file"
+          name="file"
+          type="file"
+          accept=".csv,.xlsx,.ods"
+          required
           disabled={!canSetup || pending}
-          className="h-9 rounded-full bg-ink px-4 text-[12.5px] font-semibold text-white hover:opacity-90 disabled:opacity-40"
-        >
-          {pending ? "Reading…" : "Read file"}
-        </button>
+          aria-describedby="employee-file-help"
+          onChange={(event) => { if (event.target.files?.length) event.currentTarget.form?.requestSubmit(); }}
+          className="mt-3 block w-full text-[13px] file:mr-3 file:h-10 file:rounded-full file:border file:border-rule-strong file:bg-surface file:px-4 file:text-[13px] file:font-semibold file:text-ink disabled:opacity-40"
+        />
+        <p role="status" className="mt-2 text-[12.5px] text-muted">
+          {pending ? "Reading spreadsheet…" : sheet ? `${state.fileName} · ${preview.length} employees in preview` : "Your file opens in an editable preview below."}
+        </p>
       </form>
 
       {state.status === "error" ? (
         <p role="alert" className="mt-3 text-[12px] text-[#7c2523]">{state.error}</p>
       ) : null}
 
-      {sheet ? (
+      {sheet && !pending ? (
         <div className="mt-4">
-          <p className="text-[12px] text-muted">
-            {state.fileName} · {preview.length} data rows found
-          </p>
-
+          <details>
+            <summary className="cursor-pointer text-[13px] font-semibold">Adjust columns and dates</summary>
+            <p className="mt-2 text-[12.5px] text-muted">Changing these settings refreshes the imported rows and replaces any edits to them.</p>
           <div className="mt-3 grid gap-3 sm:grid-cols-3">
             <div>
               <label htmlFor="import-sheet" className="block text-[11px] font-semibold uppercase tracking-[0.1em] text-muted">
@@ -240,7 +222,7 @@ export function EmployeeImport({
               <select
                 id="import-sheet"
                 value={sheetIndex}
-                onChange={(event) => setSheetIndex(Number(event.target.value))}
+                onChange={(event) => { const index = Number(event.target.value); setSheetIndex(index); configure(sheets[index]?.rows ?? []); }}
                 className={select}
               >
                 {sheets.map((entry, index) => (
@@ -255,7 +237,7 @@ export function EmployeeImport({
               <select
                 id="import-header"
                 value={headerRow}
-                onChange={(event) => setHeaderRow(Number(event.target.value))}
+                onChange={(event) => configure(sheet.rows, Number(event.target.value))}
                 className={select}
               >
                 {sheet.rows.slice(0, Math.min(sheet.rows.length, 25)).map((row, index) => (
@@ -324,36 +306,19 @@ export function EmployeeImport({
             </table>
           </div>
 
+          </details>
+
           {missingRequired ? (
             <p className="mt-3 text-[12px] text-[#7c2523]">
               Map a column to Employee ID and one to Employee Name (or Last and First name).
             </p>
           ) : null}
 
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-            <p className="text-[12px] text-muted">
-              Nothing is saved until you review the rows and press Save.
-            </p>
-            <button
-              type="button"
-              disabled={missingRequired || preview.length === 0 || !canSetup}
-              onClick={() => {
-                onRows(preview);
-                setAdded(preview.length);
-              }}
-              className="h-9 rounded-full border border-rule-strong px-4 text-[12.5px] font-semibold hover:bg-surface disabled:opacity-40"
-            >
-              Add {preview.length} row{preview.length === 1 ? "" : "s"} to preview
-            </button>
-          </div>
+          {duplicateMapping ? <p role="alert" className="mt-3 text-[13px] text-[#7c2523]">Each employee field can use only one column. Review the column assignments.</p> : null}
+          {!missingRequired && !duplicateMapping && preview.length === 0 ? <p role="alert" className="mt-3 text-[13px] text-[#7c2523]">No employee rows found. Check the sheet and header row.</p> : null}
 
-          {added !== null ? (
-            <p className="mt-2 text-[12px] text-accent">
-              Added {added} row{added === 1 ? "" : "s"}. Review them below, then save.
-            </p>
-          ) : null}
         </div>
       ) : null}
-    </details>
+    </section>
   );
 }

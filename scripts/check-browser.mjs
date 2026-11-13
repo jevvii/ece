@@ -126,17 +126,26 @@ try {
   // The importer itself: upload, map, preview — no save, so nothing is written.
   currentRoute = "import";
   await page.goto(`${BASE}/admin/setup?step=5`, { waitUntil: "networkidle" });
-  await page.locator("summary", { hasText: "Import from a spreadsheet" }).click();
   await page.setInputFiles("#employee-file", "fixtures/employees-sample.csv");
-  await page.getByRole("button", { name: "Read file" }).click();
-  await page.getByText(/data rows found/).waitFor({ timeout: 30_000 });
-
-  const addButton = page.getByRole("button", { name: /Add 3 rows to preview/ });
-  await addButton.click();
+  await page.getByLabel("Code row 1").waitFor({ timeout: 60_000 });
   const firstCode = await page.getByLabel("Code row 1").inputValue();
   if (firstCode !== "EMP-1001") {
     throw new Error(`Expected the preview to start with EMP-1001, received "${firstCode}"`);
   }
+
+  // Re-selecting a file replaces its draft; manual rows and edits survive.
+  await page.getByLabel("Name row 1").fill("Edited, Employee");
+  await page.getByRole("button", { name: "Add row", exact: true }).click();
+  await page.setInputFiles("#employee-file", "fixtures/employees-sample.csv");
+  await page.getByText(/employees-sample.csv · 3 employees in preview/).waitFor();
+  await page.getByLabel("Code row 4", { exact: true }).waitFor();
+  if (await page.getByLabel("Code row 5", { exact: true }).count()) throw new Error("Replacing the file duplicated imported rows");
+  await page.getByRole("button", { name: "Remove row 1", exact: true }).click();
+  await page.locator("summary", { hasText: "Adjust columns and dates" }).click();
+  await page.getByLabel("Date order", { exact: true }).selectOption("dmy");
+  if (await page.getByLabel("Code row 4", { exact: true }).count()) throw new Error("Changing date order appended imported rows");
+  await page.getByLabel("Date order", { exact: true }).selectOption("mdy");
+  await page.locator("summary", { hasText: "Adjust columns and dates" }).click();
 
   // Error highlighting: clearing a required date must mark the field and block saving.
   const hire = page.getByLabel("Hire date row 1");
@@ -158,6 +167,11 @@ try {
     throw new Error("Save stayed disabled after the row was corrected");
   }
 
+  await page.getByLabel("Code row 2", { exact: true }).fill("EMP-1001");
+  if (!(await saveButton.isDisabled())) throw new Error("Duplicate employee codes did not block saving");
+  await page.getByLabel("Code row 2", { exact: true }).fill("EMP-1002");
+  if (await saveButton.isDisabled()) throw new Error("Correcting duplicate codes did not enable saving");
+
   // Columns must be readable; the table scrolls, so there is no reason to squeeze.
   const codeBox = await page.getByLabel("Code row 1").boundingBox();
   const nameBox = await page.getByLabel("Name row 1").boundingBox();
@@ -166,6 +180,20 @@ try {
   if (!nameBox || nameBox.width < 170) throw new Error(`Name column too narrow: ${nameBox?.width}px`);
   if (!addressBox || addressBox.width < 200) throw new Error(`Address column too narrow: ${addressBox?.width}px`);
 
+  await page.locator(".scroll-x").evaluateAll((entries) => entries.forEach((element) => { element.scrollLeft = 0; }));
+  await page.screenshot({ path: "/tmp/ece-employees-after.png", fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  if (!(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))) {
+    throw new Error("The employee preview makes the mobile page overflow");
+  }
+  await page.screenshot({ path: "/tmp/ece-employees-mobile.png", fullPage: true });
+  await page.goto(`${BASE}/payroll/time-report`, { waitUntil: "networkidle" });
+  if (!(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))) {
+    throw new Error("The time upload screen makes the mobile page overflow");
+  }
+  await page.screenshot({ path: "/tmp/ece-time-mobile.png", fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.screenshot({ path: "/tmp/ece-time-after.png", fullPage: true });
   currentRoute = "done";
 } catch (error) {
   record("script", error instanceof Error ? error.message : String(error));

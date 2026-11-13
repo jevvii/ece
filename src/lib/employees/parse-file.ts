@@ -34,6 +34,11 @@ function looksBinary(bytes: Uint8Array) {
 }
 
 function toGrid(sheet: Sheet): ImportSheet {
+  if (sheet.rows.some((row, index) => row.some((cell, column) =>
+    (index >= MAX_IMPORT_ROWS || column >= MAX_IMPORT_COLS) && cell.text.trim() !== "",
+  ))) {
+    throw new Error("Use a sheet with at most 500 rows and 200 columns. Split larger rosters before importing.");
+  }
   const rows = sheet.rows
     .slice(0, MAX_IMPORT_ROWS)
     .map((row) => row.slice(0, MAX_IMPORT_COLS).map((cell) => cell.text));

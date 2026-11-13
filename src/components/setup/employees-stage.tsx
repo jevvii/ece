@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { EmployeeImport } from "./employee-import";
 import {
   blankDraft,
@@ -53,11 +53,27 @@ export function EmployeesStage({
   from: "guided" | "admin";
   canSetup: boolean;
 }) {
-  const [rows, setRows] = useState<EmployeeDraft[]>([]);
+  const [rows, setRows] = useState<Array<EmployeeDraft & { source?: "file" }>>([]);
+  const [importBusy, setImportBusy] = useState(false);
+  const replaceImportRows = useCallback((incoming: EmployeeDraft[]) => {
+    setRows((current) => [...current.filter((row) => row.source !== "file"), ...incoming.map((row) => ({ ...row, source: "file" as const }))]);
+  }, []);
   const [paste, setPaste] = useState("");
   const [pasteError, setPasteError] = useState<string | null>(null);
 
-  const issues = useMemo(() => rows.map(rowIssues), [rows]);
+  const issues = useMemo(() => {
+    const existingCodes = new Set(existing.map((employee) => employee.employeeCode.trim().toUpperCase()));
+    const counts = new Map<string, number>();
+    rows.forEach((row) => { const code = row.employeeCode.trim().toUpperCase(); counts.set(code, (counts.get(code) ?? 0) + 1); });
+    return rows.map((row) => {
+      const result = rowIssues(row);
+      const code = row.employeeCode.trim().toUpperCase();
+      if (code && (existingCodes.has(code) || (counts.get(code) ?? 0) > 1)) {
+        result.push({ field: "employeeCode", message: existingCodes.has(code) ? "Code already exists" : "Duplicate employee code" });
+      }
+      return result;
+    });
+  }, [rows, existing]);
   const blocked = issues.some((row) => row.length > 0);
   const firstProblem = issues.find((row) => row.length > 0)?.[0]?.message ?? null;
   const rowInvalid = (index: number) => (issues[index] ?? []).length > 0;
@@ -82,7 +98,9 @@ export function EmployeesStage({
   return (
     <div>
       {existing.length > 0 ? (
-        <div className="scroll-x mt-6 rounded-[14px] border border-rule">
+        <details className="mt-5 border-b border-rule pb-4">
+          <summary className="cursor-pointer text-[13px] font-medium">View {existing.length} saved employees</summary>
+        <div className="scroll-x mt-3 rounded-[14px] border border-rule">
           <table className="w-full border-collapse text-left">
             <thead>
               <tr className="border-b border-rule">
@@ -116,11 +134,12 @@ export function EmployeesStage({
             </tbody>
           </table>
         </div>
+        </details>
       ) : null}
 
       <div className="mt-6">
         <div className="flex flex-wrap items-end justify-between gap-3">
-          <h3 className="text-[12.5px] font-semibold uppercase tracking-[0.08em]">
+          <h3 className="text-[17px] font-semibold">
             Add employees
           </h3>
           <button
@@ -134,7 +153,8 @@ export function EmployeesStage({
 
         <EmployeeImport
           canSetup={canSetup}
-          onRows={(incoming) => setRows((current) => [...current, ...incoming])}
+          onRows={replaceImportRows}
+          onBusy={setImportBusy}
         />
 
         <details className="mt-3 rounded-[14px] border border-rule bg-surface-2 px-4 py-3">
@@ -146,6 +166,7 @@ export function EmployeesStage({
             TIN, Birthday, Address, Date Hired, Date Terminated, Monthly Rate.
           </p>
           <textarea
+            aria-label="Paste employee rows"
             value={paste}
             onChange={(event) => setPaste(event.target.value)}
             rows={5}
@@ -180,6 +201,10 @@ export function EmployeesStage({
             )}
           />
 
+        {rows.length > 0 ? <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+          <h3 className="text-[15px] font-semibold">Review employees <span className="font-normal text-muted">· {rows.length}</span></h3>
+          <p className="text-[12.5px] text-muted">Edit any cell, then save when the rows are ready.</p>
+        </div> : null}
         {rows.length > 0 ? (
           <div className="scroll-x mt-4 rounded-[14px] border border-rule">
             <table className="w-full min-w-[1680px] border-collapse text-left">
@@ -297,7 +322,7 @@ export function EmployeesStage({
           </p>
           <button
             type="submit"
-            disabled={!canSetup || rows.length === 0 || blocked}
+            disabled={!canSetup || importBusy || rows.length === 0 || blocked}
             className="h-10 rounded-full bg-accent px-5 text-[13px] font-semibold text-white transition-colors hover:brightness-95 disabled:opacity-40"
           >
             Save {rows.length > 0 ? `${rows.length} ` : ""}employee{rows.length === 1 ? "" : "s"}

@@ -200,7 +200,7 @@ export default async function SetupPage({
           })}
         </nav>
 
-        <div className="mt-6 grid gap-8 lg:mt-8 lg:grid-cols-[240px_1fr]">
+        <div className="mt-6 grid gap-8 lg:mt-8 lg:grid-cols-[240px_minmax(0,1fr)]">
           <nav aria-label="Setup steps" className="hidden self-start rounded-[14px] border border-rule bg-surface lg:block">
             {steps.map((item) => {
               const active = item.n === step;
@@ -236,7 +236,7 @@ export default async function SetupPage({
             })}
           </nav>
 
-          <section className="rounded-[14px] border border-rule bg-surface p-6">
+          <section className="min-w-0 rounded-[14px] border border-rule bg-surface p-4 sm:p-6">
             {step === 1 ? (
               <form action={saveCompanyDetails}>
                 <StepHead n="01" title="Company details" note="Legal identity used on payslips, 2316 and every register." />
