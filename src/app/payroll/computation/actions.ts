@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import {
   attendanceBuckets,
@@ -88,7 +88,14 @@ export async function calculateRun(formData: FormData) {
       .from(employees)
       .where(and(eq(employees.tenantId, tenant.id), eq(employees.status, "active"))),
     db
-      .select({ scheduleId: workSchedules.id, weekday: workScheduleDays.weekday, isWorkday: workScheduleDays.isWorkday })
+      .select({
+        scheduleId: workSchedules.id,
+        weekday: workScheduleDays.weekday,
+        isWorkday: workScheduleDays.isWorkday,
+        startTime: workScheduleDays.startTime,
+        endTime: workScheduleDays.endTime,
+        breakMinutes: workScheduleDays.breakMinutes,
+      })
       .from(workSchedules)
       .innerJoin(workScheduleDays, eq(workScheduleDays.scheduleId, workSchedules.id))
       .where(eq(workSchedules.tenantId, tenant.id)),
@@ -102,17 +109,24 @@ export async function calculateRun(formData: FormData) {
       .where(eq(attendanceBuckets.runId, attendanceRun.id)),
   ]);
 
-  const schedules = new Map<string, Set<number>>();
+  const schedules = new Map<string, Map<number, number>>();
   for (const row of scheduleRows) {
-    if (!row.isWorkday) continue;
-    const set = schedules.get(row.scheduleId) ?? new Set<number>();
-    set.add(row.weekday);
-    schedules.set(row.scheduleId, set);
+    const hours = schedules.get(row.scheduleId) ?? new Map<number, number>();
+    if (!row.isWorkday || !row.startTime || !row.endTime) {
+      hours.set(row.weekday, 0);
+    } else {
+      const [startHour = 0, startMinute = 0] = row.startTime.split(":").map(Number);
+      const [endHour = 0, endMinute = 0] = row.endTime.split(":").map(Number);
+      const worked = endHour * 60 + endMinute - (startHour * 60 + startMinute) - row.breakMinutes;
+      hours.set(row.weekday, Math.max(0, worked) / 60);
+    }
+    schedules.set(row.scheduleId, hours);
   }
 
   const result = computePayroll({
     cutoffNo: periodRow.period.cutoffNo,
     divisor: tenant.salaryDivisor,
+    periodDate: periodRow.period.coverageStart,
     employees: employeeRows.map((employee) => ({
       id: employee.id,
       employeeCode: employee.employeeCode,
@@ -287,6 +301,14 @@ export async function approveRun(formData: FormData) {
   };
 
   await db.transaction(async (tx) => {
+    // Serialize with attendance replacement, then validate the source again.
+    await tx.execute(sql`select id from payroll_periods where id = ${run.periodId} for update`);
+    const sourceId = (run.assumptions as { attendanceRun?: string } | null)?.attendanceRun;
+    const [currentSource] = sourceId ? await tx.select({ status: importRuns.status }).from(importRuns)
+      .where(and(eq(importRuns.id, sourceId), eq(importRuns.tenantId, tenant.id))) : [];
+    if (sourceId && currentSource?.status !== "imported") {
+      redirect(`/payroll/computation/${runId}?error=Attendance+was+replaced.+Recalculate+payroll+before+approval`);
+    }
     await tx
       .update(payRuns)
       .set({

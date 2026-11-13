@@ -179,6 +179,9 @@ export const employees = pgTable(
     firstName: text("first_name").notNull(),
     middleName: text("middle_name"),
     tin: text("tin"),
+    /** Optional at setup; collected from the client's master file. */
+    birthday: date("birthday"),
+    address: text("address"),
     hireDate: date("hire_date").notNull(),
     separationDate: date("separation_date"),
     status: text("status").notNull().default("active"),
@@ -297,6 +300,8 @@ export const attendanceDays = pgTable(
       .references(() => employees.id, { onDelete: "cascade" }),
     workDate: date("work_date").notNull(),
     hours: numeric("hours", { precision: 5, scale: 2 }).notNull().default("0"),
+    /** Minutes late on this date. Zero in day-hours imports. */
+    lateMinutes: integer("late_minutes").notNull().default(0),
     sourceValue: text("source_value"),
   },
   (table) => [
@@ -325,6 +330,31 @@ export const attendanceBuckets = pgTable(
   (table) => [
     uniqueIndex("attendance_bucket_unique_idx").on(table.runId, table.employeeId, table.code),
     index("attendance_bucket_employee_idx").on(table.employeeId),
+  ],
+);
+
+/**
+ * A late column in a client export may be one value for the whole cutoff rather
+ * than one value per date. Those totals have no work date, so they live here.
+ */
+export const attendanceLateTotals = pgTable(
+  "attendance_late_totals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => importRuns.id, { onDelete: "cascade" }),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    employeeId: uuid("employee_id")
+      .notNull()
+      .references(() => employees.id, { onDelete: "cascade" }),
+    minutes: integer("minutes").notNull().default(0),
+  },
+  (table) => [
+    uniqueIndex("attendance_late_total_idx").on(table.runId, table.employeeId),
+    index("attendance_late_total_tenant_idx").on(table.tenantId),
   ],
 );
 

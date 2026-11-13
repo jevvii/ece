@@ -39,8 +39,8 @@ export default async function AdminOverviewPage({
 
   const employeeCount = people[0]?.count ?? 0;
   const canSetup = membership.role === "company_admin" || membership.role === "payroll_officer";
-  const firstOpenBuilt = progress.checks.findIndex((check, index) => index < 4 && !check.done);
-  const continueStep = firstOpenBuilt === -1 ? 4 : firstOpenBuilt + 1;
+  const firstOpenBuilt = progress.checks.findIndex((check, index) => index < 5 && !check.done);
+  const continueStep = firstOpenBuilt === -1 ? 5 : firstOpenBuilt + 1;
 
   return (
     <>
@@ -113,18 +113,24 @@ export default async function AdminOverviewPage({
                     {check.label}
                   </span>
                   <span className="ml-auto text-[11.5px] uppercase tracking-[0.08em] text-muted">
-                    {check.done ? "Done" : index < 4 ? "Open" : "Later"}
+                    {check.done ? "Done" : index < 5 ? "Open" : "Later"}
                   </span>
                 </li>
               ))}
             </ol>
             {canSetup ? (
-              <div className="border-t border-rule px-5 py-3">
+              <div className="flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-rule px-5 py-3">
                 <Link
                   href={`/admin/setup?step=${continueStep}`}
                   className="text-[12.5px] text-ink-2 underline decoration-rule-strong underline-offset-4 hover:text-ink"
                 >
                   Continue setup
+                </Link>
+                <Link
+                  href="/admin/companies/new"
+                  className="text-[12.5px] text-ink-2 underline decoration-rule-strong underline-offset-4 hover:text-ink"
+                >
+                  New company
                 </Link>
               </div>
             ) : null}

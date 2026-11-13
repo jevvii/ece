@@ -98,7 +98,8 @@ in [`docs/deploy/staging.md`](docs/deploy/staging.md).
 ## M2 — Time Report
 
 - **Parser.** ODS is read directly from `content.xml` (merged cells, repeated
-  columns, cached values); CSV uses an RFC 4180 parser. XLSX is not wired yet.
+  columns, cached values); CSV detects comma, semicolon and tab delimiters. XLSX reads
+  the first worksheet through the same review flow.
 - **Detection.** Finds the employee-code column, the day-header row by counting
   *distinct* days (a data row full of `8`s must not win), the name column, and
   the premium/total columns. It suggests a unit from the data: a whole number
@@ -117,6 +118,9 @@ in [`docs/deploy/staging.md`](docs/deploy/staging.md).
 Run the engine checks with `pnpm check:import`. They parse the synthetic fixture
 in `fixtures/` and, when present, the real ODS in `reference/`.
 
-Known limits: XLSX, source-total reconciliation (the `Present` column is mapped
+Known limits: source-total reconciliation (the `Present` column is mapped
 but not yet compared), per-bucket units (assumed hours), and profile reuse on a
 new upload are still to come.
+
+The import workflow changes and local acceptance steps are documented in
+[`docs/uat/import-flows.md`](docs/uat/import-flows.md).

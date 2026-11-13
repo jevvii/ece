@@ -83,7 +83,7 @@ export function detectMapping(sheet: Sheet): DetectedMapping {
     const cells = rows[row] ?? [];
     for (let column = 0; column < cells.length; column += 1) {
       const text = cells[column]?.text ?? "";
-      if (/EMPLOYEE\s*(ID|NO|NUMBER|CODE)/i.test(text) || /^EMPLOYEE$/i.test(text)) {
+      if (/^\s*(?:CODE|ID|EMPLOYEE|EMP(?:LOYEE)?[\s_-]*(?:ID|NO\.?|NUMBER|CODE))\s*$/i.test(text)) {
         codeColumn = column;
         codeHeaderRow = row;
         break;

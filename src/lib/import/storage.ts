@@ -26,6 +26,7 @@ const TIMEOUT_MS = 15_000;
 const CONTENT_TYPES: Record<string, string> = {
   csv: "text/csv",
   ods: "application/vnd.oasis.opendocument.spreadsheet",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 };
 
 type SupabaseConfig = { url: string; key: string };

@@ -63,7 +63,12 @@ function parseSheet(table: Record<string, unknown>): Sheet {
   const rawRows = asArray(table["table:table-row"] as Record<string, unknown> | Record<string, unknown>[]);
 
   for (const row of rawRows) {
-    if (rows.length >= MAX_ROWS) break;
+    if (rows.length >= MAX_ROWS) {
+      if (asArray(row["table:table-cell"] as Record<string, unknown>[]).some((cell) => textOf(cell["text:p"]) || cell["@_office:value"])) {
+        throw new Error("This worksheet contains data beyond the supported rows. Split the report before importing.");
+      }
+      continue;
+    }
 
     const rowRepeat = Math.min(Number(row["@_table:number-rows-repeated"] ?? 1) || 1, 50);
     const cells: Cell[] = [];
@@ -72,7 +77,12 @@ function parseSheet(table: Record<string, unknown>): Sheet {
     ];
 
     for (const cell of rawCells) {
-      if (cells.length >= MAX_COLS) break;
+      if (cells.length >= MAX_COLS) {
+        if (textOf(cell["text:p"]) || cell["@_office:value"]) {
+          throw new Error("This worksheet contains data beyond the supported columns. Split the report before importing.");
+        }
+        continue;
+      }
 
       const repeat = Math.min(Number(cell["@_table:number-columns-repeated"] ?? 1) || 1, 256);
       const text = textOf(cell["text:p"] ?? cell).replace(/ /g, " ").trim();
@@ -112,7 +122,7 @@ function parseSheet(table: Record<string, unknown>): Sheet {
   return { name, rows };
 }
 
-export function parseOds(buffer: Uint8Array): Sheet {
+function readTables(buffer: Uint8Array): Record<string, unknown>[] {
   const files = unzipSync(buffer);
   const content = files["content.xml"];
   if (!content) throw new Error("This .ods file has no content.xml");
@@ -126,5 +136,14 @@ export function parseOds(buffer: Uint8Array): Sheet {
   );
 
   if (tables.length === 0) throw new Error("No sheets found in the workbook");
-  return parseSheet(tables[0] as Record<string, unknown>);
+  return tables as Record<string, unknown>[];
+}
+
+export function parseOds(buffer: Uint8Array): Sheet {
+  return parseSheet(readTables(buffer)[0] as Record<string, unknown>);
+}
+
+/** Every sheet in the workbook, for screens that let the user choose one. */
+export function parseOdsSheets(buffer: Uint8Array): Sheet[] {
+  return readTables(buffer).map((table) => parseSheet(table));
 }

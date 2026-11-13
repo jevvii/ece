@@ -1,12 +1,13 @@
 import {
   pagibigContribution,
   philhealthContribution,
-  premiumMatrix,
+  resolveStatutory,
   round2,
   round4,
   splitAcrossCutoffs,
   sssContribution,
   withholdingTax,
+  type StatutoryDataset,
 } from "./statutory";
 
 export type RunIssue = {
@@ -37,10 +38,13 @@ export type ComputeInput = {
   cutoffNo: number;
   divisor: number;
   employees: ComputeEmployee[];
-  schedules: Map<string, Set<number>>;
+  schedules: Map<string, Map<number, number>>;
   attendance: Array<{ employeeId: string; workDate: string; hours: number }>;
   buckets: Array<{ employeeId: string; code: string; hours: number }>;
   adjustments?: Array<{ employeeId: string; kind: "earning" | "deduction"; amount: number }>;
+  /** Rules effective on the period date; resolved from the registry when omitted. */
+  statutory?: StatutoryDataset;
+  periodDate?: string;
 };
 
 export type ComputedLine = {
@@ -84,6 +88,9 @@ const weekdayOf = (isoDate: string) => {
 
 export function computePayroll(input: ComputeInput): ComputeResult {
   const { cutoffNo, divisor, employees, schedules, attendance, buckets } = input;
+  const statutory =
+    input.statutory ??
+    resolveStatutory(input.periodDate ?? new Date().toISOString().slice(0, 10));
   const issues: RunIssue[] = [];
 
   const byEmployee = new Map<
@@ -137,29 +144,34 @@ export function computePayroll(input: ComputeInput): ComputeResult {
       });
     }
 
-    let daysPaid = 0;
+    let daysPaidExact = 0;
     let restDayHours = 0;
 
     for (const day of entry.days) {
-      const scheduled = schedule ? schedule.has(weekdayOf(day.workDate)) : true;
-      if (!scheduled) {
+      // Schedule maps weekday -> scheduled hours (0 on rest days). No schedule
+      // keeps the old 8-hour assumption.
+      const scheduledHours = schedule ? (schedule.get(weekdayOf(day.workDate)) ?? 0) : 8;
+      if (scheduledHours <= 0) {
         restDayHours += day.hours;
         continue;
       }
       if (day.hours <= 0) continue;
-      if (day.hours < 4) {
-        daysPaid += 0.5;
+
+      // Pay the fraction of the scheduled day actually worked. This prorates
+      // lateness/undertime and makes a 4-hour day half a day, not a full one.
+      const fraction = Math.min(1, day.hours / scheduledHours);
+      daysPaidExact += fraction;
+      if (day.hours < scheduledHours) {
         issues.push({
           employeeCode: employee.employeeCode,
           kind: "partial_day",
-          message: `${day.workDate}: ${day.hours} h counted as a half day.`,
+          message: `${day.workDate}: ${day.hours.toFixed(2)} h of ${scheduledHours.toFixed(2)} scheduled (${(fraction * 100).toFixed(1)}% of a day).`,
         });
-      } else {
-        daysPaid += 1;
       }
     }
+    const daysPaid = round4(daysPaidExact);
 
-    const basic = round2(dailyRate * daysPaid);
+    const basic = round2(dailyRate * daysPaidExact);
     const allowance = splitAcrossCutoffs(employee.monthlyAllowance, cutoffNo);
 
     let overtime = 0;
@@ -169,7 +181,7 @@ export function computePayroll(input: ComputeInput): ComputeResult {
     const breakdown: ComputedLine["breakdown"] = [];
 
     for (const [code, hours] of entry.buckets) {
-      const rule = premiumMatrix[code];
+      const rule = statutory.premiumMatrix[code];
       if (!rule) {
         issues.push({
           employeeCode: employee.employeeCode,
@@ -217,9 +229,9 @@ export function computePayroll(input: ComputeInput): ComputeResult {
     const adjustmentEarning = round2(entry.adjustmentEarning);
     const gross = round2(basic + allowance + adjustmentEarning + overtime + nightDiff + holiday + premium);
 
-    const sssMonthly = sssContribution(employee.monthlyRate);
-    const phMonthly = philhealthContribution(employee.monthlyRate);
-    const piMonthly = pagibigContribution(employee.monthlyRate);
+    const sssMonthly = sssContribution(employee.monthlyRate, statutory);
+    const phMonthly = philhealthContribution(employee.monthlyRate, statutory);
+    const piMonthly = pagibigContribution(employee.monthlyRate, statutory);
 
     const sssEmployee = splitAcrossCutoffs(sssMonthly.employee, cutoffNo);
     const sssEmployer = splitAcrossCutoffs(sssMonthly.employer + sssMonthly.ec, cutoffNo);
@@ -233,7 +245,7 @@ export function computePayroll(input: ComputeInput): ComputeResult {
         ? 0
         : Math.max(0, round2(gross - sssEmployee - philhealthEmployee - pagibigEmployee));
 
-    const tax = withholdingTax(taxable);
+    const tax = withholdingTax(taxable, statutory);
     const otherDeductions = round2(entry.adjustmentDeduction);
     const netPay = round2(gross - sssEmployee - philhealthEmployee - pagibigEmployee - tax - otherDeductions);
     if (netPay < 0) {

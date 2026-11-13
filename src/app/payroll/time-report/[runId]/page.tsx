@@ -1,31 +1,25 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ne, sql } from "drizzle-orm";
 import { WorkspaceFooter, WorkspaceHeader } from "@/components/workspace-header";
 import { db } from "@/db/client";
 import {
   attendanceBuckets,
   attendanceDays,
+  attendanceLateTotals,
   employees,
   importRuns,
   payrollPeriods,
+  payRuns,
 } from "@/db/schema";
 import { requireWorkspace } from "@/lib/auth";
-import { parseCsv } from "@/lib/import/csv";
-import { parseOds } from "@/lib/import/ods";
+import { loadImportContext } from "@/lib/import/context";
+import { parseTimeReportFile } from "@/lib/import/parse-file";
+import { detectMappingV2, type MappingV2 } from "@/lib/import/mapping-v2";
 import { readUpload } from "@/lib/import/storage";
-import { dayUnitLabel, type DetectedMapping, type ImportIssue, type Sheet, type Unit } from "@/lib/import/types";
+import type { ImportIssue, Sheet } from "@/lib/import/types";
 import { formatRange } from "@/lib/periods";
-import { confirmImport } from "../actions";
-
-const roleOptions: Array<[string, string]> = [
-  ["ignore", "Ignore"],
-  ["employee_code", "Employee code"],
-  ["employee_name", "Employee name"],
-  ["day", "Day hours"],
-  ["bucket", "Premium bucket"],
-  ["total", "Source total"],
-];
+import { MappingGrid } from "./mapping-grid";
 
 const issueKindLabel: Record<string, string> = {
   unknown_employee: "Unknown code",
@@ -36,7 +30,16 @@ const issueKindLabel: Record<string, string> = {
   implausible_hours: "Implausible hours",
   no_days: "No days",
   total_mismatch: "Total mismatch",
+  day_mismatch: "Date mismatch",
+  late_on_rest_day: "Late on rest day",
+  missing_schedule: "No schedule",
 };
+
+function dateAt(start: string, offset: number) {
+  const date = new Date(`${start}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + offset);
+  return date.toISOString().slice(0, 10);
+}
 
 function dateForDay(day: number, start: string, end: string) {
   const cursor = new Date(`${start}T00:00:00Z`);
@@ -57,7 +60,7 @@ export default async function TimeReportRunPage({
 }) {
   const { runId } = await params;
   const { error } = await searchParams;
-  const { tenant } = await requireWorkspace();
+  const { tenant, membership } = await requireWorkspace();
 
   const [run] = await db
     .select()
@@ -71,56 +74,62 @@ export default async function TimeReportRunPage({
     ? await db.select().from(payrollPeriods).where(eq(payrollPeriods.id, run.periodId)).limit(1)
     : [];
 
-  const mapping = run.mapping as unknown as DetectedMapping;
   const issues = (run.issues ?? []) as ImportIssue[];
-  const isImported = run.status === "imported";
+  const isImported = run.status === "imported" || run.status === "superseded";
+  const storedMapping = run.mapping as unknown as MappingV2 & { version?: number };
 
-  const employeeRows = await db
-    .select({
-      id: employees.id,
-      employeeCode: employees.employeeCode,
-      lastName: employees.lastName,
-      firstName: employees.firstName,
-    })
-    .from(employees)
-    .where(eq(employees.tenantId, tenant.id))
-    .orderBy(asc(employees.employeeCode));
-
-  let samples: Record<number, string> = {};
   let sheetData: Sheet | null = null;
-
-  if (!isImported && run.storageKey) {
+  if (run.storageKey) {
     try {
       const bytes = await readUpload(run.storageKey);
-      const sheet =
-        run.fileKind === "ods"
-          ? parseOds(new Uint8Array(bytes))
-          : parseCsv(new TextDecoder().decode(bytes));
-      sheetData = sheet;
-
-      samples = Object.fromEntries(
-        mapping.columns.map((column) => {
-          for (let row = mapping.dataStartRow; row < mapping.dataStartRow + 6; row += 1) {
-            const text = sheet.rows[row]?.[column.index]?.text?.trim();
-            if (text) return [column.index, text.slice(0, 24)];
-          }
-          return [column.index, ""];
-        }),
-      );
+      sheetData = parseTimeReportFile(new Uint8Array(bytes), run.fileName);
     } catch {
-      samples = {};
+      sheetData = null;
     }
   }
 
-  const unknownIssues = issues.filter((issue) => issue.kind === "unknown_employee");
-  const unknownCodes = [...new Set(unknownIssues.map((issue) => issue.code ?? ""))].filter(Boolean);
-  const nameColumn = mapping.columns.find((column) => column.role === "employee_name");
-  const unknownDetails = unknownCodes.map((code) => {
-    const issue = unknownIssues.find((candidate) => candidate.code === code);
-    const row = sheetData && issue ? sheetData.rows[issue.row - 1] : undefined;
-    const name = nameColumn && row ? (row[nameColumn.index]?.text ?? "") : "";
-    return { code, name };
-  });
+  // v1 runs stored a per-column mapping; re-detect into v2 when the file exists.
+  const mapping: MappingV2 | null =
+    storedMapping?.version === 2
+      ? storedMapping
+      : sheetData
+        ? detectMappingV2(sheetData)
+        : null;
+
+  // Mapping runs in its own full-viewport shell, modelled on onboarding.
+  if (!isImported && mapping && sheetData) {
+    const [context, previousImports, payroll] = await Promise.all([
+      loadImportContext(tenant.id),
+      run.periodId ? db.select({ id: importRuns.id, fileName: importRuns.fileName }).from(importRuns)
+        .where(and(eq(importRuns.tenantId, tenant.id), eq(importRuns.periodId, run.periodId), eq(importRuns.status, "imported"), ne(importRuns.id, run.id)))
+        .orderBy(desc(importRuns.importedAt)) : Promise.resolve([]),
+      run.periodId ? db.select({ status: payRuns.status }).from(payRuns)
+        .where(and(eq(payRuns.tenantId, tenant.id), eq(payRuns.periodId, run.periodId))).limit(1) : Promise.resolve([]),
+    ]);
+    return (
+      <MappingGrid
+        runId={run.id}
+        previousImports={previousImports}
+        payrollApproved={payroll[0]?.status === "approved"}
+        sheet={sheetData}
+        detected={mapping}
+        employees={context.employees}
+        externalIds={context.externalIds}
+        schedules={context.schedules}
+        canWrite={membership.role === "company_admin" || membership.role === "payroll_officer"}
+        coverageStart={period?.coverageStart ?? ""}
+        coverageEnd={period?.coverageEnd ?? ""}
+        profileName={`${mapping.sheetName} columns`}
+        fileName={run.fileName}
+        periodLabel={
+          period
+            ? `${period.cycleLabel} · cutoff ${period.cutoffNo} · ${formatRange(period.coverageStart, period.coverageEnd)}`
+            : "No cutoff attached"
+        }
+        error={error}
+      />
+    );
+  }
 
   const dayRows = isImported
     ? await db
@@ -149,13 +158,27 @@ export default async function TimeReportRunPage({
         .orderBy(asc(attendanceBuckets.code))
     : [];
 
-  const dayColumns = mapping.columns
-    .flatMap((column) => {
-      if (column.role !== "day" || !column.day || !period) return [];
-      const date = dateForDay(column.day, period.coverageStart, period.coverageEnd);
-      return date ? [{ ...column, date }] : [];
-    })
-    .sort((a, b) => a.date.localeCompare(b.date));
+  const lateRows = isImported
+    ? await db
+        .select({ minutes: sql<string>`coalesce(sum(${attendanceDays.lateMinutes}), 0)` })
+        .from(attendanceDays)
+        .where(eq(attendanceDays.runId, run.id))
+    : [];
+  const periodLateRows = isImported
+    ? await db
+        .select({ minutes: sql<string>`coalesce(sum(${attendanceLateTotals.minutes}), 0)` })
+        .from(attendanceLateTotals)
+        .where(eq(attendanceLateTotals.runId, run.id))
+    : [];
+  const lateMinutes = Number(lateRows[0]?.minutes ?? 0) + Number(periodLateRows[0]?.minutes ?? 0);
+
+  const dayColumns =
+    period && mapping && mapping.dayStart != null && mapping.dayEnd != null
+      ? Array.from({ length: mapping.dayEnd - mapping.dayStart + 1 }, (_, offset) => ({
+          index: mapping.dayStart! + offset,
+          date: dateAt(period.coverageStart, offset),
+        })).filter((column) => column.date <= period.coverageEnd)
+      : [];
 
   const grid = new Map<string, { code: string; name: string; hours: Map<string, number>; total: number }>();
   for (const row of dayRows) {
@@ -184,18 +207,14 @@ export default async function TimeReportRunPage({
 
         <div className="mt-6 flex flex-wrap items-end justify-between gap-6">
           <div>
-            <p className="flex items-center gap-2 text-[12px] font-semibold uppercase tracking-[0.12em] text-muted">
-              <span className="h-1.5 w-1.5 rounded-full bg-accent" aria-hidden="true" />
-              {run.fileKind.toUpperCase()} · {mapping.sheetName}
-            </p>
-            <h1 className="mt-4 font-serif text-[clamp(2.25rem,4.5vw,3rem)] leading-[1.04] tracking-[-0.03em]">
+            <h1 className="font-serif text-[36px] leading-[1.04] tracking-[-0.03em]">
               Time report
             </h1>
             <p className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-ink-2">
               <span className="max-w-[34ch] truncate font-mono text-[12.5px] text-muted">{run.fileName}</span>
               <span className="text-rule-strong" aria-hidden="true">·</span>
               <span>
-                {mapping.companyName ? `${mapping.companyName} · ` : ""}
+                {mapping?.companyName ? `${mapping.companyName} · ` : ""}
                 {period
                   ? `${period.cycleLabel} · cutoff ${period.cutoffNo} · ${formatRange(period.coverageStart, period.coverageEnd)}`
                   : "No cutoff attached"}
@@ -205,7 +224,7 @@ export default async function TimeReportRunPage({
           <div className="text-left sm:text-right">
             <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-muted">Status</p>
             <p className={`mt-1 text-[12.5px] uppercase tracking-[0.08em] ${isImported ? "text-accent" : "text-warn"}`}>
-              {isImported ? "Imported" : run.status === "review" ? "Needs review" : "Mapping"}
+              {run.status === "superseded" ? "Replaced" : isImported ? "Imported" : run.status === "review" ? "Needs review" : "Mapping"}
             </p>
             <p className="figure mt-1 text-[12px] text-muted">
               {run.rowCount} rows · {dayRows.length} day records
@@ -215,176 +234,23 @@ export default async function TimeReportRunPage({
 
         {error ? (
           <div role="alert" className="mt-6 rounded-[10px] border border-[#9f2f2d]/25 bg-[#fdebec] px-4 py-3 text-[13px] text-[#7c2523]">
-            {decodeURIComponent(error)}
+            {error}
           </div>
         ) : null}
 
+        {run.status === "superseded" ? <p className="mt-6 border-y border-rule py-3 text-[13px] text-ink-2">A newer import is used for this cutoff. This report remains available in the import history.</p> : null}
         {!isImported ? (
-          <>
-            <div className="mt-7 rounded-[10px] border border-rule-strong bg-surface px-4 py-3">
-              <p className="text-[12.5px] leading-[1.6] text-ink-2">
-                {mapping.notes.join(" ")} Columns were proposed from the header — check the
-                employee code, day columns and units before importing.
-              </p>
-            </div>
-
-            {unknownCodes.length > 0 ? (
-              <section id="resolve" className="mt-6 border border-[#e8c98a] bg-[#fbf3db] p-5">
-                <h2 className="text-[12.5px] font-semibold uppercase tracking-[0.08em] text-[#956400]">
-                  Unbound employee codes · {unknownCodes.length}
-                </h2>
-                <p className="mt-1.5 max-w-[70ch] text-[12.5px] leading-[1.6] text-[#7a5a14]">
-                  These codes are not in the employee master, and names never create an employee.
-                  Bind each one once; the binding is saved for later cutoffs.
-                </p>
-                <div className="mt-4 max-h-[320px] overflow-auto rounded-[14px] border border-rule bg-surface">
-                  <table className="w-full border-collapse text-left">
-                    <thead className="sticky top-0 bg-surface">
-                      <tr className="border-b border-rule">
-                        <th className="px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-muted">Code</th>
-                        <th className="px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-muted">Name in file</th>
-                        <th className="px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-muted">Bind to employee</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {unknownDetails.slice(0, 60).map((detail, index) => (
-                        <tr key={detail.code} className="border-b border-rule last:border-b-0">
-                          <td className="figure px-3 py-2 text-[12.5px]">{detail.code}</td>
-                          <td className="max-w-[240px] truncate px-3 py-2 text-[12.5px] text-ink-2" title={detail.name}>
-                            {detail.name || "—"}
-                          </td>
-                          <td className="px-3 py-2">
-                            <select
-                              name={`alias-${index}`}
-                              form="mapping-form"
-                              defaultValue=""
-                              className="h-8 w-full rounded-[10px] border border-rule-strong bg-surface px-1.5 text-[12.5px]"
-                            >
-                              <option value="">Leave unbound</option>
-                              {employeeRows.map((employee) => (
-                                <option key={employee.id} value={employee.id}>
-                                  {employee.employeeCode} · {employee.lastName}, {employee.firstName}
-                                </option>
-                              ))}
-                            </select>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
-            ) : null}
-
-            <form id="mapping-form" action={confirmImport} className="mt-6">
-              <input type="hidden" name="runId" value={run.id} />
-              <input type="hidden" name="unknownCount" value={unknownCodes.length} />
-              {unknownCodes.slice(0, 60).map((code, index) => (
-                <input key={code} type="hidden" name={`unknownCode-${index}`} value={code} />
-              ))}
-
-              <div className="grid gap-4 rounded-[14px] border border-rule bg-surface p-5 sm:grid-cols-3">
-                <div>
-                  <label htmlFor="dayUnit" className="block text-[11px] font-semibold uppercase tracking-[0.1em] text-muted">
-                    Day values are
-                  </label>
-                  <select
-                    id="dayUnit"
-                    name="dayUnit"
-                    defaultValue={mapping.suggestedUnit}
-                    className="mt-2 h-10 w-full rounded-[10px] border border-rule-strong bg-surface px-2 text-[13.5px]"
-                  >
-                    {(Object.keys(dayUnitLabel) as Unit[]).map((unit) => (
-                      <option key={unit} value={unit}>{dayUnitLabel[unit]}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label htmlFor="profileName" className="block text-[11px] font-semibold uppercase tracking-[0.1em] text-muted">
-                    Save profile as
-                  </label>
-                  <input
-                    id="profileName"
-                    name="profileName"
-                    defaultValue={`${mapping.sheetName} · ${mapping.signature}`}
-                    className="mt-2 h-10 w-full rounded-[10px] border border-rule-strong bg-surface px-3 text-[13.5px]"
-                  />
-                </div>
-                <div className="flex items-end">
-                  <button
-                    type="submit"
-                    className="h-10 w-full rounded-full bg-accent px-5 text-[13px] font-semibold text-white transition-colors hover:brightness-95"
-                  >
-                    Confirm mapping and import
-                  </button>
-                </div>
-              </div>
-
-              <div className="mt-6 rounded-[14px] border border-rule bg-surface">
-                <div className="flex items-center justify-between border-b border-rule px-4 py-3">
-                  <h2 className="text-[12.5px] font-semibold uppercase tracking-[0.08em]">Column mapping</h2>
-                  <span className="figure text-[12px] text-muted">{mapping.columns.length} columns</span>
-                </div>
-                <div className="max-h-[560px] overflow-auto">
-                  <table className="w-full border-collapse text-left">
-                    <thead className="sticky top-0 bg-surface">
-                      <tr className="border-b border-rule">
-                        {["#", "Header", "Sample", "Role", "Code / day"].map((heading) => (
-                          <th key={heading} className="px-3 py-2.5 text-[11px] font-semibold uppercase tracking-[0.1em] text-muted">
-                            {heading}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {mapping.columns.map((column) => (
-                        <tr key={column.index} className="border-b border-rule last:border-b-0">
-                          <td className="figure px-3 py-2 text-[11.5px] text-muted">{column.index}</td>
-                          <td className="max-w-[280px] truncate px-3 py-2 text-[12.5px]" title={column.header}>
-                            {column.header}
-                          </td>
-                          <td className="figure max-w-[150px] truncate px-3 py-2 text-[12px] text-muted">
-                            {samples[column.index] ?? "—"}
-                          </td>
-                          <td className="px-3 py-2">
-                            <select
-                              name={`role-${column.index}`}
-                              defaultValue={column.role}
-                              className="h-8 w-full rounded-[10px] border border-rule-strong bg-surface px-1.5 text-[12.5px]"
-                            >
-                              {roleOptions.map(([value, label]) => (
-                                <option key={value} value={value}>{label}</option>
-                              ))}
-                            </select>
-                          </td>
-                          <td className="px-3 py-2">
-                            {column.role === "bucket" || column.role === "total" ? (
-                              <input
-                                name={`code-${column.index}`}
-                                defaultValue={column.code ?? ""}
-                                className="figure h-8 w-full rounded-[10px] border border-rule-strong bg-surface px-1.5 text-[12px]"
-                              />
-                            ) : (
-                              <span className="figure block text-[12px] text-muted">
-                                {column.day ? `day ${column.day}` : "—"}
-                              </span>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </form>
-          </>
+          <div className="mt-7 rounded-[10px] border border-[#e8c98a] bg-[#fbf3db] px-4 py-3 text-[12.5px] text-[#7a5a14]">
+            The uploaded file is no longer available, so this run cannot be mapped. Upload it again.
+          </div>
         ) : (
           <>
-            <div className="mt-7 grid gap-px border border-rule bg-rule sm:grid-cols-4">
+            <div className="mt-7 grid gap-px border border-rule bg-rule sm:grid-cols-5">
               {[
                 ["Employees matched", String(grid.size)],
                 ["Day records", String(dayRows.length)],
                 ["Premium buckets", String(bucketRows.length)],
+                ["Late minutes", String(lateMinutes)],
                 ["Issues", String(issues.length)],
               ].map(([label, value]) => (
                 <div key={label} className="bg-surface px-4 py-3">

@@ -1,0 +1,4 @@
+Employee ID,Employee Name,TIN,Birthday,Address,Date Hired,Date Terminated,Monthly Rate
+EMP-1001,"Dela Cruz, Maria Clara",111-222-333-000,05/04/1990,"12 Mabini St, Manila",01/05/2026,,30000
+EMP-1002,"Reyes, Juan Miguel",222-333-444-000,11/23/1988,"45 Rizal Ave, Quezon City",06/16/2025,03/31/2026,25000
+EMP-1003,"Santos, Ana Liza",,,,02/01/2026,,18500

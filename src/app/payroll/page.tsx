@@ -44,7 +44,7 @@ export default async function PayrollHomePage({
       .where(eq(leaveBalances.tenantId, tenant.id)),
   ]);
 
-  if (!calendar) redirect("/payroll/onboarding");
+  if (!progress.requiredComplete) redirect("/payroll/onboarding");
 
   const approvedRuns = allRuns.filter((run) => run.status === "approved");
   const journals = journalCount[0]?.count ?? 0;
