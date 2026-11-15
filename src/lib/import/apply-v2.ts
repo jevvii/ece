@@ -210,6 +210,7 @@ export function applyMappingV2(input: ApplyV2Input): ApplyV2Output {
       });
     }
 
+    const firstDayRecord = days.length;
     for (const column of dateColumns) {
       if (!column.date) continue;
       const cell = row[column.index];
@@ -381,6 +382,13 @@ export function applyMappingV2(input: ApplyV2Input): ApplyV2Output {
         if (!Number.isFinite(minutes) || minutes < 0 || minutes > 31 * 24 * 60) {
           pushIssue({ row: rowIndex + 1, column: mapping.periodLate.index, code, kind: "non_numeric",
             message: "Period lateness must contain a valid non-negative number. Check the value and unit." });
+        } else if (mapping.mode === "late") {
+          // The cutoff total checks daily lateness; it isn't extra lateness.
+          const dailyMinutes = days.slice(firstDayRecord).reduce((sum, day) => sum + day.lateMinutes, 0);
+          if (Math.round(minutes) !== dailyMinutes) {
+            pushIssue({ row: rowIndex + 1, column: mapping.periodLate.index, code, kind: "total_mismatch",
+              message: `Cutoff lateness is ${Math.round(minutes)} min, but the mapped dates add up to ${dailyMinutes} min. Correct the values or column units.` });
+          }
         } else totals.set(employeeId, Math.round(minutes));
       }
     }

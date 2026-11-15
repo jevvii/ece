@@ -18,12 +18,13 @@ Open http://localhost:3000 and sign in as `maria@tala.ph` with `payroll123` (loc
 
 1. Open `/payroll/time-report`. Select **November 2026 · cutoff 1 · Oct 26 – Nov 10**, then choose `fixtures/sample-attendance.csv`. The spreadsheet opens automatically.
 2. Check column assignments. **Column settings** provides keyboard-accessible selectors and a first-data-row field; the sheet also supports pointer selection.
-3. Open **Review mapping**. Employee totals use saved code matches and actual work schedules. Match unknown codes to existing employees; the preview updates immediately. No new employee is created by matching a code.
-4. Confirm only when issues are resolved. Duplicates, unrecognized values, impossible hours, missing schedules in lateness mode, and mismatched dates block import. Successfully read half-day annotations remain informational.
-5. After confirmation, compare the saved hours and lateness with the preview. Reload the run and verify it remains imported.
-6. Upload another report for the same cutoff. Confirmation stays disabled until **Replace the previous attendance import** is checked. The older report remains in history as **Replaced**. Approved payroll blocks attendance changes; replacing attendance requires recalculating an existing draft before approval.
-7. Try an XLSX or ODS export with attendance on its first worksheet. CSV also accepts semicolon and tab delimiters. Supported bounds are 10 MB, 500 populated rows, and 200 columns. Larger files are rejected rather than partially imported.
-8. Test both a desktop viewport and a narrow mobile viewport. Wide employee and attendance tables scroll within their own containers.
+3. Open **Review mapping**. Employee totals match company employee codes, saved aliases, then exact unique full names (given-name surname or surname, given-name), allowing case and spacing differences. Ambiguous or partial names require manual matching. Totals use actual work schedules. Match unknown codes to existing employees; the preview updates immediately. No new employee is created by matching a code.
+4. Set **Date values** to **Worked time** or **Lateness**, then choose **Date units** (hours/minutes). The meaning applies to all dates; individual column units can be adjusted if the source mixes units. Special pays always use accumulated hours. **Cutoff lateness units** is separate. In lateness mode, a populated cutoff total must equal the sum of daily lateness and is not added again. In worked-time mode it remains a separate total.
+5. Confirm only when issues are resolved. Duplicates, unrecognized values, impossible hours, missing schedules in lateness mode, and mismatched dates block import. Successfully read half-day annotations remain informational.
+6. After confirmation, compare the saved hours and lateness with the preview. Reload the run and verify it remains imported.
+7. Upload another report for the same cutoff. Confirmation stays disabled until **Replace the previous attendance import** is checked. The older report remains in history as **Replaced**. Approved payroll blocks attendance changes; replacing attendance requires recalculating an existing draft before approval.
+8. Try an XLSX or ODS export with attendance on its first worksheet. CSV also accepts semicolon and tab delimiters. Supported bounds are 10 MB, 500 populated rows, and 200 columns. Larger files are rejected rather than partially imported.
+9. Test both a desktop viewport and a narrow mobile viewport. Wide employee and attendance tables scroll within their own containers.
 
 An existing unconfirmed report with invalid automatic assignments is detected again when reopened. Valid manual mappings and imported history remain unchanged. For the multi-row attendance layout, verify code column B, name column C, and first data row 8.
 
@@ -38,6 +39,6 @@ An existing unconfirmed report with invalid automatic assignments is detected ag
 - `node scripts/check-time-import.mjs` — local-only synthetic attendance import, aliases, schedules, custom data start, preview/save parity and duplicate blocking, replacement history, and approval locks; removes its test runs afterward. Requires the sample cutoff to have no imported attendance.
 - `pnpm build`
 
-The time report uses the first worksheet. Saved profiles retain column assignments for reference; automatic reuse and source-total reconciliation are outside this change. `pnpm build` synchronizes supported MIME types with the existing private Supabase bucket. Its privacy, existing allowed formats, and size limit are preserved. Local storage is unaffected.
+The time report uses the first worksheet. Saved profiles retain column assignments for reference; automatic profile reuse is not enabled. Cutoff lateness totals reconcile against daily lateness when date values are lateness. `pnpm build` synchronizes supported MIME types with the existing private Supabase bucket. Its privacy, existing allowed formats, and size limit are preserved. Local storage is unaffected.
 
-Changes are developed and committed on `feat/import-flow-optimization`, based on `feat/payroll-engine-correctness`, then merged into local `staging`. The user approved including the existing 18-commit setup/import/payroll stack. No remote push or deployment is part of this task.
+Changes are developed and committed on `feat/import-flow-optimization`, based on `feat/payroll-engine-correctness`, then merged into local `staging`. The user approved including the existing 18-commit setup/import/payroll stack. Subsequent fixes are committed on dedicated branches, merged into `staging`, and pushed to origin with user authorization. Matching and time-setting changes use `fix/time-report-matching-and-inputs`. Private UAT workbooks stay under ignored `.data/`.

@@ -13,6 +13,7 @@ import { useFormStatus } from "react-dom";
 import { validateMappingV2 } from "@/lib/import/review";
 import type { Sheet } from "@/lib/import/types";
 import { confirmImport } from "../actions";
+import { TimeInputSettings } from "./time-input-settings";
 
 type Employee = { id: string; employeeCode: string; lastName: string; firstName: string };
 type Selection = { kind: "column" | "range" | "row"; start: number; end: number };
@@ -259,7 +260,7 @@ export function MappingGrid({
         : [
             { key: "code", label: "Employee code", chip: null },
             { key: "name", label: "Employee name", chip: null },
-            { key: "late", label: "Period late total", chip: null },
+            { key: "late", label: "Cutoff lateness total", chip: null },
           ]),
     ];
   }, [selection, mode]);
@@ -274,7 +275,7 @@ export function MappingGrid({
   if (assign.dayStart != null && assign.dayEnd != null) {
     chips.push({
       id: "days",
-      label: "Day range",
+      label: mode === "late" ? "Lateness dates" : "Worked dates",
       detail: `${colLetter(assign.dayStart)}–${colLetter(assign.dayEnd)}`,
       clear: () => setAssign({ ...assign, dayStart: null, dayEnd: null }),
     });
@@ -282,7 +283,7 @@ export function MappingGrid({
   for (const [code, indexes] of Object.entries(assign.buckets)) {
     chips.push({
       id: `bucket:${code}`,
-      label: code,
+      label: `${code} hours`,
       detail: indexes.map(colLetter).join(", "),
       clear: () => {
         const buckets = { ...assign.buckets };
@@ -294,7 +295,7 @@ export function MappingGrid({
   if (assign.periodLate != null) {
     chips.push({
       id: "late",
-      label: "Period late",
+      label: "Cutoff lateness",
       detail: colLetter(assign.periodLate),
       clear: () => setAssign({ ...assign, periodLate: null }),
     });
@@ -385,36 +386,6 @@ export function MappingGrid({
           <p className="max-w-[46ch] truncate text-[11px] text-muted">{periodLabel}</p>
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-2">
-          <div className="flex gap-1" role="radiogroup" aria-label="Import mode">
-            {(["days", "late"] as ImportMode[]).map((value) => (
-              <button
-                key={value}
-                type="button"
-                role="radio"
-                aria-checked={mode === value}
-                onClick={() => {
-                  setMode(value);
-                  // Late values are minutes by default; day values are hours.
-                  // Carrying the previous units across a mode switch silently
-                  // turned "9" into nine late hours.
-                  setUnits((current) => {
-                    const updated = { ...current };
-                    if (rangeStart != null && rangeEnd != null) {
-                      for (let index = rangeStart; index <= rangeEnd; index += 1) {
-                        updated[String(index)] = value === "late" ? "minutes" : "hours";
-                      }
-                    }
-                    return updated;
-                  });
-                }}
-                className={`h-8 rounded-full border px-3 text-[12px] font-semibold transition-colors duration-150 ${
-                  mode === value ? "border-accent bg-accent-soft text-accent" : "border-rule-strong text-ink-2 hover:bg-surface-2"
-                }`}
-              >
-                {value === "days" ? "Day hours" : "Lateness"}
-              </button>
-            ))}
-          </div>
           {reviewOpen ? (
             <button type="button" onClick={() => setReviewOpen(false)} className="h-8 rounded-full border border-rule-strong px-3 text-[12px] font-semibold hover:bg-surface-2">
               Back to grid
@@ -467,6 +438,17 @@ export function MappingGrid({
           )),
         )}
 
+        <TimeInputSettings mode={mode} units={units} columns={rangeColumns} coverageStart={coverageStart}
+          lateColumn={assign.periodLate} lateUnit={periodLateUnit} onLateUnitChange={setPeriodLateUnit}
+          onUnitsChange={setUnits} onModeChange={(nextMode) => {
+            if (nextMode === mode) return;
+            setMode(nextMode);
+            setUnits((current) => {
+              const updated = { ...current };
+              for (const index of rangeColumns) updated[String(index)] = nextMode === "late" ? "minutes" : "hours";
+              return updated;
+            });
+          }} />
         {reviewOpen ? (
           <div className="panel-in min-h-0 flex-1 overflow-auto px-6 py-8">
             <div className="mx-auto w-full max-w-[920px]">
@@ -484,7 +466,7 @@ export function MappingGrid({
                 {[
                   ["Employees", String(preview?.matchedEmployees ?? 0)],
                   ["Day records", String(preview?.days.length ?? 0)],
-                  ["Buckets", String(preview?.buckets.length ?? 0)],
+                  ["Special pays", String(preview?.buckets.length ?? 0)],
                   ["Issues", String(preview?.issues.length ?? 0)],
                 ].map(([labelText, value]) => (
                   <div key={labelText} className="bg-surface px-4 py-3">
@@ -495,7 +477,7 @@ export function MappingGrid({
               </div>
 
               <p className="mt-3 text-[11.5px] text-muted">
-                Uses saved employee matches and assigned work schedules. Nothing is saved until you confirm.
+                Matches employee codes, saved aliases, then unique full names within this company. Uses assigned work schedules. Nothing is saved until you confirm.
               </p>
 
               {preview?.issues.some((issue) => issue.kind === "day_mismatch") ? (
@@ -515,11 +497,11 @@ export function MappingGrid({
                   <table className="w-full border-collapse text-left">
                     <thead>
                       <tr className="border-b border-rule">
-                        {["Code", "Employee", "Days", "Hours", "Late"].map((heading) => (
+                        {["Code", "Employee", "Days", "Hours", "Late (min)"].map((heading) => (
                           <th
                             key={heading}
                             className={`px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted ${
-                              heading === "Days" || heading === "Hours" || heading === "Late" ? "text-right" : ""
+                              heading === "Days" || heading === "Hours" || heading === "Late (min)" ? "text-right" : ""
                             }`}
                           >
                             {heading}
@@ -544,31 +526,6 @@ export function MappingGrid({
                   </table>
                 </div>
               </div>
-
-              {rangeColumns.length > 0 ? (
-                <details className="mt-4 rounded-[14px] border border-rule bg-surface-2 px-4 py-3">
-                  <summary className="cursor-pointer text-[12.5px] font-semibold marker:hidden">Per-day units · {rangeColumns.length} columns</summary>
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <span className="text-[12px] text-muted">Set all to</span>
-                    {(["hours", "minutes"] as V2Unit[]).map((unit) => (
-                      <button key={unit} type="button" onClick={() => setUnits((current) => { const updated = { ...current }; for (const index of rangeColumns) updated[String(index)] = unit; return updated; })} className="h-8 rounded-full border border-rule-strong px-3 text-[12px] font-semibold hover:bg-surface">
-                        {mode === "late" ? (unit === "hours" ? "Late hours" : "Late minutes") : unit === "hours" ? "Day hours" : "Day minutes"}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="mt-3 grid gap-2 sm:grid-cols-3">
-                    {rangeColumns.map((index) => (
-                      <div key={index} className="flex items-center gap-2">
-                        <span className="figure w-8 shrink-0 text-[11.5px] text-muted">{colLetter(index)}</span>
-                        <select aria-label={`Unit for column ${colLetter(index)}`} value={units[String(index)] ?? defaultUnit} onChange={(event) => setUnits((current) => ({ ...current, [String(index)]: event.target.value as V2Unit }))} className="h-8 w-full rounded-[10px] border border-rule-strong bg-surface px-2 text-[12px]">
-                          <option value="hours">{mode === "late" ? "Late hours" : "Day hours"}</option>
-                          <option value="minutes">{mode === "late" ? "Late minutes" : "Day minutes"}</option>
-                        </select>
-                      </div>
-                    ))}
-                  </div>
-                </details>
-              ) : null}
 
               {unknownCodes.length > 0 ? (
                 <details open className="mt-4 rounded-[14px] border border-[#e8c98a] bg-[#fbf3db] px-4 py-3">
@@ -839,7 +796,7 @@ export function MappingGrid({
             >
               <span className="flex items-center gap-2">
                 <span className="h-2 w-2 rounded-full bg-[#a4552f]" aria-hidden="true" />
-                Premium codes ({premiumCodes.length})
+                Special pays · total hours ({premiumCodes.length})
               </span>
               <span aria-hidden="true">{premiumOpen ? "▾" : "▸"}</span>
             </button>

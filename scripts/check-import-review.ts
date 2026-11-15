@@ -83,4 +83,27 @@ assert.equal(matchRow("FOREIGN", "Unknown Person", [employee], [{ code: "FOREIGN
 const collision = matchRow("E1", "Jane Doe", [employee, { ...namesake, employeeCode: " e1 " }]);
 assert.equal(collision.matchedEmployees, 0, "normalized code collisions cannot silently pick an employee");
 assert.ok(collision.blockingIssueCount > 0);
+for (const [mode, unit, value, hours, late] of [
+  ["days", "hours", 8, 8, 0], ["days", "minutes", 480, 8, 0],
+  ["late", "hours", 0.5, 7.5, 30], ["late", "minutes", 30, 7.5, 30],
+] as const) {
+  const applied = applyMappingV2({ ...input, schedules: { e1: { 1: 8 } },
+    mapping: { ...mapping, mode, dayUnits: { "1": unit }, buckets: { ROT: [2, 3] }, periodLate: { index: 4, unit: "minutes" } },
+    sheet: parseTimeReportFile(strToU8(`Code,26,ROT,ROT,Total late\nE1,${value},2,0.25,30`), "attendance.csv") });
+  assert.equal(applied.blockingIssueCount, 0, `${mode}/${unit} accepts consistent totals`);
+  assert.equal(applied.days[0]?.hours, hours);
+  assert.equal(applied.days[0]?.lateMinutes, late);
+  assert.equal(applied.buckets[0]?.hours, 2.25, "special pays remain accumulated hours in every date mode");
+  assert.equal(applied.totals.reduce((sum, total) => sum + total.minutes, 0) + late, 30, "cutoff lateness is counted once");
+}
+const lateMapping: MappingV2 = { ...mapping, mode: "late", dayEnd: 2,
+  dayUnits: { "1": "minutes", "2": "hours" }, periodLate: { index: 3, unit: "hours" } };
+const reconcile = (summary: string) => applyMappingV2({ ...input, mapping: lateMapping,
+  schedules: { e1: { 1: 8, 2: 8 } }, period: { ...input.period, coverageEnd: "2026-10-27" },
+  sheet: parseTimeReportFile(strToU8(`Code,26,27,Total late\nE1,30,0.5,${summary}`), "attendance.csv") });
+assert.equal(reconcile("1").blockingIssueCount, 0, "daily late units and cutoff total units convert independently");
+assert.deepEqual(reconcile("1").totals, [], "a reconciled total isn't persisted as additional lateness");
+assert.ok(reconcile("2").issues.some((issue) => issue.kind === "total_mismatch"), "inconsistent cutoff totals block saving");
+assert.ok(reconcile("0").blockingIssueCount > 0, "explicit zero total must also reconcile");
+assert.equal(reconcile("").blockingIssueCount, 0, "an empty optional total does not invent a mismatch");
 console.log("import review checks passed");
