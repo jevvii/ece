@@ -29,8 +29,13 @@ what you have to do once.
      app's own 10 MiB check — the app measures 10 × 1024 × 1024, while Supabase
      parses `12MB` as 12,000,000, so an exact `10MB` here would reject files the
      app considers valid.
-   - **Allowed MIME types:** `text/csv` and
-     `application/vnd.oasis.opendocument.spreadsheet`.
+   - **Allowed MIME types:** `text/csv`,
+     `application/vnd.oasis.opendocument.spreadsheet`, and
+     `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` (XLSX).
+   - `pnpm build` checks this existing bucket and adds missing supported formats.
+     It preserves the private setting, existing allowed types, and file-size limit.
+     A storage configuration failure stops deployment instead of releasing an app
+     whose upload formats the bucket rejects.
    - Leave policies empty. The service-role key bypasses RLS and is only ever
      used server-side; these bucket limits are enforced by the Storage API for
      every upload regardless of key.

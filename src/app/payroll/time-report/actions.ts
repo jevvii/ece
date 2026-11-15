@@ -29,7 +29,7 @@ import {
   type MappingV2,
   type V2Unit,
 } from "@/lib/import/mapping-v2";
-import { readUpload, saveUpload } from "@/lib/import/storage";
+import { readUpload, saveUpload, UploadStorageError } from "@/lib/import/storage";
 
 const MAX_BYTES = MAX_TIME_REPORT_BYTES;
 
@@ -88,7 +88,16 @@ export async function uploadTimeReport(formData: FormData) {
   }
 
   const runId = crypto.randomUUID();
-  const storageKey = await saveUpload(tenant.id, runId, extension, bytes);
+  let storageKey: string;
+  try {
+    storageKey = await saveUpload(tenant.id, runId, extension, bytes);
+  } catch (error) {
+    console.error(JSON.stringify({ event: "time_report_upload_failed", runId, stage: "storage",
+      reason: error instanceof UploadStorageError ? error.code : "unavailable",
+      status: error instanceof UploadStorageError ? error.status : undefined }));
+    const message = error instanceof UploadStorageError ? error.message : "The file could not be saved. Please try again in a moment.";
+    redirect(`/payroll/time-report?periodId=${encodeURIComponent(periodId)}&error=${encodeURIComponent(message)}`);
+  }
 
   await db.insert(importRuns).values({
     id: runId,
