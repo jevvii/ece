@@ -15,7 +15,7 @@ import {
 import { requireWorkspace } from "@/lib/auth";
 import { loadImportContext } from "@/lib/import/context";
 import { parseTimeReportFile } from "@/lib/import/parse-file";
-import { detectMappingV2, type MappingV2 } from "@/lib/import/mapping-v2";
+import { getEditableMappingV2, type MappingV2 } from "@/lib/import/mapping-v2";
 import { readUpload } from "@/lib/import/storage";
 import type { ImportIssue, Sheet } from "@/lib/import/types";
 import { formatRange } from "@/lib/periods";
@@ -88,13 +88,11 @@ export default async function TimeReportRunPage({
     }
   }
 
-  // v1 runs stored a per-column mapping; re-detect into v2 when the file exists.
+  // Keep imported history unchanged; repair invalid previews from their source.
   const mapping: MappingV2 | null =
-    storedMapping?.version === 2
+    storedMapping?.version === 2 && (isImported || !sheetData)
       ? storedMapping
-      : sheetData
-        ? detectMappingV2(sheetData)
-        : null;
+      : sheetData ? getEditableMappingV2(sheetData, storedMapping) : null;
 
   // Mapping runs in its own full-viewport shell, modelled on onboarding.
   if (!isImported && mapping && sheetData) {

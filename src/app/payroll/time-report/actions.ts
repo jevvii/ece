@@ -22,6 +22,7 @@ import { MAX_TIME_REPORT_BYTES, parseTimeReportFile } from "@/lib/import/parse-f
 import {
   applyMappingV2,
   detectMappingV2,
+  getEditableMappingV2,
   premiumCodes,
   validateMappingV2,
   type ImportMode,
@@ -128,10 +129,9 @@ export async function confirmImport(formData: FormData) {
   const bytes = await readUpload(run.storageKey);
   const sheet = parseTimeReportFile(new Uint8Array(bytes), run.fileName);
 
-  // Old runs stored the v1 per-column mapping. Re-detect for those rather than
-  // trying to convert it: the screen is target-first now.
+  // Match the mapping shown in review, including recovery of broken detection.
   const stored = run.mapping as unknown as MappingV2;
-  const base = stored?.version === 2 ? stored : detectMappingV2(sheet);
+  const base = getEditableMappingV2(sheet, stored);
 
   const readIndex = (value: FormDataEntryValue | null, fallback: number | null, maximum = 199) => {
     const text = String(value ?? "");

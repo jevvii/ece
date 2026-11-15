@@ -1,6 +1,7 @@
 import { detectMapping } from "./detect";
 import type { MappingV2, V2Unit } from "./apply-v2";
 import type { Sheet } from "./types";
+import { validateMappingV2 } from "./review";
 
 export type { ApplyV2Input, ApplyV2Output, EmployeeLite, ImportMode, MappingV2, V2Unit } from "./apply-v2";
 export { applyMappingV2, bucketColumns, premiumCodes } from "./apply-v2";
@@ -22,7 +23,7 @@ export function detectMappingV2(sheet: Sheet): MappingV2 {
 
   const lateColumn =
     base.columns.find((column) => column.code === "LATE_MINUTES") ??
-    base.columns.find((column) => /late|absent/i.test(column.header));
+    base.columns.find((column) => (column.role === "total" || column.role === "ignore") && /\b(?:lates?|lateness|absen(?:t|ts|ce|ces))\b/i.test(column.header));
 
   const buckets: Record<string, number[]> = {};
   for (const column of base.columns) {
@@ -64,4 +65,9 @@ export function detectMappingV2(sheet: Sheet): MappingV2 {
   };
 }
 
-export { validateMappingV2 } from "./review";
+/** Revisit invalid auto-detected previews without replacing valid user mappings. */
+export function getEditableMappingV2(sheet: Sheet, stored: MappingV2 | null | undefined): MappingV2 {
+  return stored?.version === 2 && validateMappingV2(stored, sheet) === null ? stored : detectMappingV2(sheet);
+}
+
+export { validateMappingV2 };
