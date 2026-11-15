@@ -31,11 +31,13 @@ An existing unconfirmed report with invalid automatic assignments is detected ag
 
 - `pnpm typecheck`
 - `pnpm check:import` — parser, multi-row header and data-start detection, role conflicts, preview recovery, validation and arithmetic regressions
+- `pnpm check:storage` — private storage configuration, XLSX MIME rejection, and idempotent allowlist updates
+- `node scripts/check-upload-storage-browser.mjs` — production build required; verifies storage rejection stays in the upload flow, retains the cutoff, and succeeds on retry after configuration
 - `pnpm check:payroll` — unchanged payroll calculation behavior
 - `pnpm check:browser` — application routes, automatic employee preview, replacement and field validation
 - `node scripts/check-time-import.mjs` — local-only synthetic attendance import, aliases, schedules, custom data start, preview/save parity and duplicate blocking, replacement history, and approval locks; removes its test runs afterward. Requires the sample cutoff to have no imported attendance.
 - `pnpm build`
 
-The time report uses the first worksheet. Saved profiles retain column assignments for reference; automatic reuse and source-total reconciliation are outside this change. Supabase storage installations must allow the XLSX MIME type `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` in the private uploads bucket before accepting XLSX uploads.
+The time report uses the first worksheet. Saved profiles retain column assignments for reference; automatic reuse and source-total reconciliation are outside this change. `pnpm build` synchronizes supported MIME types with the existing private Supabase bucket. Its privacy, existing allowed formats, and size limit are preserved. Local storage is unaffected.
 
 Changes are developed and committed on `feat/import-flow-optimization`, based on `feat/payroll-engine-correctness`, then merged into local `staging`. The user approved including the existing 18-commit setup/import/payroll stack. No remote push or deployment is part of this task.

@@ -27,10 +27,10 @@ const statusTone: Record<string, string> = {
 export default async function TimeReportPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; periodId?: string }>;
 }) {
   const { tenant, membership } = await requireWorkspace();
-  const { error } = await searchParams;
+  const { error, periodId } = await searchParams;
   const canWrite = membership.role === "company_admin" || membership.role === "payroll_officer";
 
   const calendar = await getActiveCalendar(tenant.id);
@@ -99,7 +99,7 @@ export default async function TimeReportPage({
             ) : (
               <TimeReportUpload
                 periods={periods.map((period) => ({ id: period.id, label: `${period.cycleLabel} · cutoff ${period.cutoffNo} · ${formatRange(period.coverageStart, period.coverageEnd)}` }))}
-                defaultPeriodId={currentPeriod?.id ?? ""}
+                defaultPeriodId={periods.some((period) => period.id === periodId) ? periodId! : currentPeriod?.id ?? ""}
                 canWrite={canWrite}
               />
             )}

@@ -66,8 +66,47 @@ function toArrayBuffer(data: Uint8Array): ArrayBuffer {
 }
 
 function storageError(action: string, status: number, detail: string) {
-  // Never include the service-role key or the signed URL in an error surfaced to a user.
-  return new Error(`Supabase Storage ${action} failed (${status})${detail ? `: ${detail}` : ""}`);
+  if (action === "upload") {
+    const code = (status === 400 || status === 415) && /mime|content.?type/i.test(detail) ? "file_type_not_allowed" : "unavailable";
+    return new UploadStorageError(code, status);
+  }
+  return new Error(`Supabase Storage ${action} failed (${status})`);
+}
+
+export class UploadStorageError extends Error {
+  constructor(readonly code: "file_type_not_allowed" | "unavailable", readonly status?: number) {
+    super(code === "file_type_not_allowed"
+      ? "This file type is temporarily unavailable. Save the spreadsheet as CSV or ODS and try again."
+      : "The file could not be saved. Please try again in a moment.");
+    this.name = "UploadStorageError";
+  }
+}
+
+/** Deployment check: add supported formats without changing privacy or size limits. */
+export async function configureUploadStorage() {
+  if (storageBackend() === "local") return { backend: "local", updated: false };
+  const config = supabaseConfig()!;
+  const url = `${config.url}/storage/v1/bucket/${encodeURIComponent(SUPABASE_BUCKET)}`;
+  const headers = { Authorization: `Bearer ${config.key}`, "Content-Type": "application/json" };
+  const response = await fetch(url, { headers, cache: "no-store", signal: AbortSignal.timeout(TIMEOUT_MS) });
+  if (!response.ok) throw storageError("bucket configuration read", response.status, "");
+  const bucket = await response.json() as { public: unknown; allowed_mime_types: unknown; file_size_limit?: number | null };
+  if (bucket.public !== false) throw new Error("The upload storage bucket must be private.");
+  if (bucket.allowed_mime_types === null) return { backend: "supabase", updated: false };
+  if (!Array.isArray(bucket.allowed_mime_types) || bucket.allowed_mime_types.some((value) => typeof value !== "string")) {
+    throw new Error("The upload bucket returned an invalid file type configuration.");
+  }
+  const current: string[] = bucket.allowed_mime_types;
+  const required = Object.values(CONTENT_TYPES);
+  if (required.every((type) => current.includes(type))) return { backend: "supabase", updated: false };
+  const allowed = [...new Set([...current, ...required])];
+  const update = await fetch(url, {
+    method: "PUT", headers, cache: "no-store", signal: AbortSignal.timeout(TIMEOUT_MS),
+    body: JSON.stringify({ id: SUPABASE_BUCKET, name: SUPABASE_BUCKET, public: false,
+      allowed_mime_types: allowed, file_size_limit: bucket.file_size_limit }),
+  });
+  if (!update.ok) throw storageError("bucket configuration update", update.status, "");
+  return { backend: "supabase", updated: true };
 }
 
 function normaliseKey(storageKey: string) {
