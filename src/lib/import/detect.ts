@@ -3,6 +3,8 @@ import type { Cell, ColumnMapping, DetectedMapping, Sheet, Unit } from "./types"
 
 const DAY_MAX = 31;
 const WEEKDAY = /^(M|T|W|TH|F|SAT|SUN|MON|TUE|WED|THU|FRI)$/i;
+const CODE_HEADER = /^\s*(?:CODE|ID|EMPLOYEE|EMP(?:LOYEE)?[\s_-]*(?:ID(?:[\s_-]*(?:NO\.?|NUMBER))?|NO\.?|NUMBER|CODE))[\s#.]*$/i;
+const DATE_HEADER = /^\s*(?:dates?|days?)\s*$/i;
 
 function isDayNumber(cell: Cell | undefined): boolean {
   if (!cell) return false;
@@ -83,7 +85,7 @@ export function detectMapping(sheet: Sheet): DetectedMapping {
     const cells = rows[row] ?? [];
     for (let column = 0; column < cells.length; column += 1) {
       const text = cells[column]?.text ?? "";
-      if (/^\s*(?:CODE|ID|EMPLOYEE|EMP(?:LOYEE)?[\s_-]*(?:ID|NO\.?|NUMBER|CODE))\s*$/i.test(text)) {
+      if (CODE_HEADER.test(text)) {
         codeColumn = column;
         codeHeaderRow = row;
         break;
@@ -99,6 +101,9 @@ export function detectMapping(sheet: Sheet): DetectedMapping {
 
   for (let row = 0; row < Math.min(20, rows.length); row += 1) {
     const cells = rows[row] ?? [];
+    // Once identity headers are known, attendance rows are not header candidates.
+    const code = codeColumn >= 0 ? cells[codeColumn]?.text.trim() ?? "" : "";
+    if (row > codeHeaderRow && codeColumn >= 0 && code && !WEEKDAY.test(code) && !CODE_HEADER.test(code) && !DATE_HEADER.test(code)) continue;
     const found: number[] = [];
     const unique = new Set<number>();
 
@@ -123,7 +128,7 @@ export function detectMapping(sheet: Sheet): DetectedMapping {
   }
 
   if (codeColumn === -1) {
-    for (let column = 0; column < 6 && codeColumn === -1; column += 1) {
+    for (let column = 0; column < Math.min(6, dayColumns[0]!) && codeColumn === -1; column += 1) {
       const samples = rows
         .slice(dayHeaderRow + 1, dayHeaderRow + 12)
         .map((row) => row[column]?.text ?? "")
@@ -142,9 +147,10 @@ export function detectMapping(sheet: Sheet): DetectedMapping {
 
   for (let row = searchFrom; row < Math.min(searchFrom + 12, rows.length); row += 1) {
     const code = rows[row]?.[codeColumn]?.text?.trim() ?? "";
-    const name = rows[row]?.[nameColumn]?.text?.trim() ?? "";
-    const looksLikeCode = code.length >= 2 && !WEEKDAY.test(code) && (/\d/.test(code) || code.includes("-"));
-    if (looksLikeCode && /[A-Za-z]{2,}/.test(name)) {
+    const name = nameColumn == null ? "" : rows[row]?.[nameColumn]?.text?.trim() ?? "";
+    const looksLikeCode = code.length >= 1 && !WEEKDAY.test(code) && !CODE_HEADER.test(code) && !DATE_HEADER.test(code) &&
+      (/\d/.test(code) || code.includes("-") || (codeHeaderRow >= 0 && /^[A-Z]+$/i.test(code)));
+    if (looksLikeCode && (nameColumn == null || /[A-Za-z]{2,}/.test(name))) {
       dataStartRow = row;
       break;
     }
@@ -247,17 +253,24 @@ export function detectMapping(sheet: Sheet): DetectedMapping {
 }
 
 function findNameColumn(sheet: Sheet, codeColumn: number, fromRow: number, dayColumns: number[]) {
-  const firstDayColumn = dayColumns[0] ?? Number.MAX_SAFE_INTEGER;
-
-  for (let column = codeColumn + 1; column < firstDayColumn; column += 1) {
+  const firstDayColumn = dayColumns[0] ?? 0;
+  const candidates = Array.from({ length: firstDayColumn }, (_, column) => column)
+    .filter((column) => column !== codeColumn);
+  for (const row of sheet.rows.slice(0, fromRow)) {
+    const explicit = candidates.find((column) => /^\s*(?:EMP(?:LOYEE)?[\s_-]*)?(?:FULL[\s_-]*)?NAME\s*$/i.test(row[column]?.text ?? ""));
+    if (explicit != null) return explicit;
+  }
+  if (codeColumn < 0) return null;
+  // Prefer a name beside the code, while allowing exports with the name first.
+  for (const column of [...candidates.filter((column) => column > codeColumn), ...candidates.filter((column) => column < codeColumn)]) {
     const samples = sheet.rows
       .slice(fromRow, fromRow + 12)
       .map((row) => row[column]?.text ?? "")
       .filter((text) => text && !WEEKDAY.test(text));
-    if (samples.length >= 2 && samples.some((text) => /[A-Za-z]{3,}/.test(text))) {
+    if (samples.length >= 1 && samples.some((text) => /[A-Za-z]{3,}/.test(text))) {
       return column;
     }
   }
 
-  return codeColumn + 1;
+  return null;
 }

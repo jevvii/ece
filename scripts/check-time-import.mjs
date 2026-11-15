@@ -5,6 +5,7 @@ import { unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import postgres from "postgres";
+import { zipSync, strToU8 } from "fflate";
 import { chromium } from "playwright-core";
 
 const BASE = process.env.BASE_URL ?? "http://localhost:3000";
@@ -42,16 +43,42 @@ try {
   const activeBefore = await sql`select id from import_runs where period_id = ${period.id} and status = 'imported'`;
   assert.equal(activeBefore.length, 0, "test cutoff must have no existing attendance; use a clean local demo cutoff");
 
-  async function upload(suffix, contents) {
+  async function upload(suffix, contents, kind = "csv") {
     await page.goto(`${BASE}/payroll/time-report`, { waitUntil: "networkidle" });
     await page.locator("#periodId").selectOption(period.id);
-    await page.setInputFiles("#file", { name: `${namespace}-${suffix}.csv`, mimeType: "text/csv", buffer: Buffer.from(contents) });
+    await page.setInputFiles("#file", { name: `${namespace}-${suffix}.${kind}`, mimeType: kind === "ods" ? "application/vnd.oasis.opendocument.spreadsheet" : "text/csv", buffer: Buffer.from(contents) });
     await page.waitForURL((url) => /^\/payroll\/time-report\/[a-f0-9-]+$/.test(url.pathname));
     const id = page.url().split("/").pop();
     await page.getByRole("button", { name: "Review mapping" }).waitFor();
     assert.equal(await page.getByText("Step 1 of 3 · Detect").count(), 0, "no artificial delay screen");
     return id;
   }
+
+  // Match the reference ODS layout using invented header text and employee names.
+  const odsRows = [["EXAMPLE COMPANY INC."], [], [], [], ["", "", "", "26", "27", "28"],
+    ["", "", "", "MON", "TUE", "WED"], ["", "EMPLOYEE ID NUMBER", "EXAMPLE COMPANY INC."],
+    ["", employee.employee_code, "Synthetic employee", "8", "8", "8"]];
+  const escapeXml = (text) => text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+  const ods = zipSync({ "content.xml": strToU8(`<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"><office:body><office:spreadsheet><table:table table:name="Attendance">${odsRows.map((row) => `<table:table-row>${row.map((value) => `<table:table-cell><text:p>${escapeXml(value)}</text:p></table:table-cell>`).join("")}</table:table-row>`).join("")}</table:table></office:spreadsheet></office:body></office:document-content>`) });
+  const odsId = await upload("multi-header", ods, "ods");
+  const [odsRun] = await sql`select mapping from import_runs where id = ${odsId}`;
+  assert.equal(odsRun.mapping.headerRow, 6);
+  assert.equal(odsRun.mapping.dataStartRow, 7);
+  assert.equal(odsRun.mapping.employeeCode, 1);
+  assert.equal(odsRun.mapping.employeeName, 2);
+  // A bad mapping saved by the previous detector must recover when reopened.
+  await sql`update import_runs set mapping = ${sql.json({ ...odsRun.mapping, headerRow: 4, dataStartRow: 5, employeeCode: 4, employeeName: 5 })} where id = ${odsId}`;
+  await page.reload({ waitUntil: "networkidle" });
+  await page.getByText("Column settings", { exact: true }).click();
+  assert.equal(await page.getByLabel("First data row", { exact: true }).inputValue(), "8");
+  assert.equal(await page.getByLabel("Employee code", { exact: true }).inputValue(), "1");
+  assert.equal(await page.getByLabel("Employee name", { exact: true }).inputValue(), "2");
+  await page.getByRole("button", { name: "Review mapping" }).click();
+  assert.equal(await page.getByRole("button", { name: "Confirm and import", exact: true }).isDisabled(), false);
+  await upload("code-only", `Employee Code,26,27,28\n${employee.employee_code},8,8,8`);
+  await page.getByRole("button", { name: "Review mapping" }).click();
+  assert.equal(await page.getByRole("button", { name: "Confirm and import", exact: true }).isDisabled(), false);
+  console.log("multi-row ODS, existing preview recovery, and code-only detection passed");
 
   const runId = await upload("alias", `Code,Name,26,27,28\nIGNORE,Not attendance,8,8,8\n${alias},Synthetic employee,0,60,0`);
   await page.getByText("Column settings", { exact: true }).click();
@@ -134,11 +161,11 @@ try {
 } finally {
   await browser.close();
   if (payrollId) await sql`delete from pay_runs where id = ${payrollId}`;
-  const owned = await sql`select id, tenant_id, storage_key, profile_id from import_runs where file_name like ${`${namespace}%`}`;
+  const owned = await sql`select id, tenant_id, storage_key, profile_id, file_kind from import_runs where file_name like ${`${namespace}%`}`;
   for (const row of owned) {
     await sql`delete from import_runs where id = ${row.id}`;
     if (row.profile_id) await sql`delete from import_profiles where id = ${row.profile_id}`;
-    const key = `${row.tenant_id}/${row.id}.csv`;
+    const key = `${row.tenant_id}/${row.id}.${row.file_kind}`;
     if (row.storage_key === key) await unlink(join(process.cwd(), ".data/uploads", key)).catch((error) => { if (error.code !== "ENOENT") throw error; });
   }
   await sql`delete from employee_external_ids where code = ${alias}`;

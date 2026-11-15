@@ -25,10 +25,12 @@ Open http://localhost:3000 and sign in as `maria@tala.ph` with `payroll123` (loc
 7. Try an XLSX or ODS export with attendance on its first worksheet. CSV also accepts semicolon and tab delimiters. Supported bounds are 10 MB, 500 populated rows, and 200 columns. Larger files are rejected rather than partially imported.
 8. Test both a desktop viewport and a narrow mobile viewport. Wide employee and attendance tables scroll within their own containers.
 
+An existing unconfirmed report with invalid automatic assignments is detected again when reopened. Valid manual mappings and imported history remain unchanged. For the multi-row attendance layout, verify code column B, name column C, and first data row 8.
+
 ## Verification
 
 - `pnpm typecheck`
-- `pnpm check:import` — parser, mapping, validation and arithmetic regressions
+- `pnpm check:import` — parser, multi-row header and data-start detection, role conflicts, preview recovery, validation and arithmetic regressions
 - `pnpm check:payroll` — unchanged payroll calculation behavior
 - `pnpm check:browser` — application routes, automatic employee preview, replacement and field validation
 - `node scripts/check-time-import.mjs` — local-only synthetic attendance import, aliases, schedules, custom data start, preview/save parity and duplicate blocking, replacement history, and approval locks; removes its test runs afterward. Requires the sample cutoff to have no imported attendance.
