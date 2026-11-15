@@ -55,4 +55,55 @@ for (const [value, mode] of [["-5", "late"], ["99999", "late"], ["HD=99999", "da
 const invalidPremium = applyMappingV2({ ...input, mapping: { ...mapping, buckets: { ROT: [2] } },
   sheet: parseTimeReportFile(strToU8("Code,26,ROT\nE1,8,oops"), "attendance.csv") });
 assert.ok(invalidPremium.blockingIssueCount > 0, "non-numeric premium cannot be silently discarded");
+
+const namedMapping = { ...mapping, employeeName: 1, dayStart: 2, dayEnd: 2 };
+function matchRow(code: string, name: string, employees = [employee], externalIds = input.externalIds) {
+  return applyMappingV2({ ...input, employees, externalIds, mapping: namedMapping,
+    sheet: parseTimeReportFile(strToU8(`Code,Name,26\n${code},"${name}",8`), "attendance.csv") });
+}
+for (const name of ["  jane   DOE ", " doe ,  Jane "]) {
+  const matched = matchRow("EXPORT-1", name);
+  assert.equal(matched.days[0]?.employeeId, employee.id, "unique full names match despite case and whitespace differences");
+  assert.equal(matched.blockingIssueCount, 0);
+}
+assert.equal(matchRow("", "Jane Doe").days[0]?.employeeId, employee.id, "a unique full name can match a blank source code");
+assert.equal(matchRow("EXPORT-1", "Jane").matchedEmployees, 0, "partial names never auto-match");
+assert.equal(matchRow("EXPORT-1", "Jane Do").matchedEmployees, 0, "approximate names never auto-match");
+assert.equal(matchRow("EXPORT-1", "Jane Doe", []).matchedEmployees, 0, "only the selected company's roster is eligible");
+const namesake = { ...employee, id: "e2", employeeCode: "E2" };
+const ambiguous = matchRow("EXPORT-1", "Jane Doe", [employee, namesake]);
+assert.equal(ambiguous.matchedEmployees, 0, "duplicate full names require an explicit match");
+assert.deepEqual(ambiguous.unknownCodes, ["EXPORT-1"]);
+assert.ok(ambiguous.blockingIssueCount > 0);
+assert.equal(matchRow("E2", "Jane Doe", [employee, namesake]).days[0]?.employeeId, "e2", "canonical codes take precedence over ambiguous names");
+assert.equal(matchRow("EXT-1", "Jane Doe", [employee, namesake]).days[0]?.employeeId, "e1", "saved aliases take precedence over names");
+assert.equal(matchRow("EXPORT-1", "Jane Doe", [employee, namesake], [{ code: "EXPORT-1", employeeId: "e2" }]).days[0]?.employeeId, "e2", "reviewed aliases resolve ambiguous names");
+assert.equal(matchRow("E1", "Jane Doe", [employee], [{ code: "E1", employeeId: "e2" }]).days[0]?.employeeId, "e1", "an alias cannot override a canonical code");
+assert.equal(matchRow("FOREIGN", "Unknown Person", [employee], [{ code: "FOREIGN", employeeId: "outside-company" }]).matchedEmployees, 0, "foreign aliases cannot resolve an employee outside this company");
+const collision = matchRow("E1", "Jane Doe", [employee, { ...namesake, employeeCode: " e1 " }]);
+assert.equal(collision.matchedEmployees, 0, "normalized code collisions cannot silently pick an employee");
+assert.ok(collision.blockingIssueCount > 0);
+for (const [mode, unit, value, hours, late] of [
+  ["days", "hours", 8, 8, 0], ["days", "minutes", 480, 8, 0],
+  ["late", "hours", 0.5, 7.5, 30], ["late", "minutes", 30, 7.5, 30],
+] as const) {
+  const applied = applyMappingV2({ ...input, schedules: { e1: { 1: 8 } },
+    mapping: { ...mapping, mode, dayUnits: { "1": unit }, buckets: { ROT: [2, 3] }, periodLate: { index: 4, unit: "minutes" } },
+    sheet: parseTimeReportFile(strToU8(`Code,26,ROT,ROT,Total late\nE1,${value},2,0.25,30`), "attendance.csv") });
+  assert.equal(applied.blockingIssueCount, 0, `${mode}/${unit} accepts consistent totals`);
+  assert.equal(applied.days[0]?.hours, hours);
+  assert.equal(applied.days[0]?.lateMinutes, late);
+  assert.equal(applied.buckets[0]?.hours, 2.25, "special pays remain accumulated hours in every date mode");
+  assert.equal(applied.totals.reduce((sum, total) => sum + total.minutes, 0) + late, 30, "cutoff lateness is counted once");
+}
+const lateMapping: MappingV2 = { ...mapping, mode: "late", dayEnd: 2,
+  dayUnits: { "1": "minutes", "2": "hours" }, periodLate: { index: 3, unit: "hours" } };
+const reconcile = (summary: string) => applyMappingV2({ ...input, mapping: lateMapping,
+  schedules: { e1: { 1: 8, 2: 8 } }, period: { ...input.period, coverageEnd: "2026-10-27" },
+  sheet: parseTimeReportFile(strToU8(`Code,26,27,Total late\nE1,30,0.5,${summary}`), "attendance.csv") });
+assert.equal(reconcile("1").blockingIssueCount, 0, "daily late units and cutoff total units convert independently");
+assert.deepEqual(reconcile("1").totals, [], "a reconciled total isn't persisted as additional lateness");
+assert.ok(reconcile("2").issues.some((issue) => issue.kind === "total_mismatch"), "inconsistent cutoff totals block saving");
+assert.ok(reconcile("0").blockingIssueCount > 0, "explicit zero total must also reconcile");
+assert.equal(reconcile("").blockingIssueCount, 0, "an empty optional total does not invent a mismatch");
 console.log("import review checks passed");

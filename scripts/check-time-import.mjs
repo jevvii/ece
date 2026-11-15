@@ -80,20 +80,33 @@ try {
   assert.equal(await page.getByRole("button", { name: "Confirm and import", exact: true }).isDisabled(), false);
   console.log("multi-row ODS, existing preview recovery, and code-only detection passed");
 
-  const runId = await upload("alias", `Code,Name,26,27,28\nIGNORE,Not attendance,8,8,8\n${alias},Synthetic employee,0,60,0`);
+  const fullName = `${employee.first_name} ${employee.last_name}`.toUpperCase().replaceAll('"', '""');
+  const nameMatchId = await upload("name-match", `Code,Name,26,27,28\nNAME-${namespace},"${fullName}",480,480,480`);
+  await page.getByLabel("Date units", { exact: true }).selectOption("minutes");
+  await page.getByRole("button", { name: "Review mapping" }).click();
+  assert.equal(await page.getByRole("button", { name: "Confirm and import", exact: true }).isDisabled(), false, "unique full names auto-match to the uploaded company roster");
+  assert.equal(await page.getByLabel(`Match employee NAME-${namespace.toUpperCase()}`, { exact: true }).count(), 0);
+  assert.equal(Number((await page.locator("table tbody tr").first().locator("td").allTextContents())[3]), 24, "worked minutes convert across all dates");
+  console.log("unique full-name matching and worked-minute controls passed");
+
+  const runId = await upload("alias", `Code,Name,26,27,28,ROT,Total late\nIGNORE,Not attendance,8,8,8,0,0\n${alias},Synthetic employee,0,1,0,2,1`);
   await page.getByText("Column settings", { exact: true }).click();
   await page.getByLabel("First data row", { exact: true }).fill("3");
-  await page.getByRole("radio", { name: "Lateness", exact: true }).click();
+  await page.getByLabel("Date values", { exact: true }).selectOption("late");
+  await page.getByLabel("Date units", { exact: true }).selectOption("hours");
   await page.getByRole("button", { name: "Review mapping" }).click();
   const confirm = page.getByRole("button", { name: "Confirm and import", exact: true });
   assert.ok(await confirm.isDisabled(), "unknown employee blocks importing");
   assert.equal(await page.getByLabel("Match employee IGNORE", { exact: true }).count(), 0, "selected data start excludes the note row");
   await page.getByLabel(`Match employee ${alias}`, { exact: true }).selectOption(employee.id);
+  assert.equal(await confirm.isDisabled(), true, "a mismatched cutoff total blocks confirmation");
+  await page.getByText(/Cutoff lateness is 1 min/).waitFor();
+  await page.getByLabel("Cutoff lateness units", { exact: true }).selectOption("hours");
   assert.equal(await confirm.isDisabled(), false, "reviewed match recalculates attendance immediately");
   const previewCells = await page.locator("table tbody tr").first().locator("td").allTextContents();
   const previewHours = Number(previewCells[3]);
   const previewLate = Number(previewCells[4]);
-  assert.equal(previewLate, 60, "late mode uses minutes");
+  assert.equal(previewLate, 60, "late hours convert to minutes for review");
   await page.screenshot({ path: "/tmp/ece-time-review-desktop.png", fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: "/tmp/ece-time-review-mobile.png", fullPage: true });
@@ -108,6 +121,13 @@ try {
   assert.equal(totals.count, 3, "new alias attendance is included on the first confirmation");
   assert.equal(totals.hours, previewHours, "preview hours equal persisted hours");
   assert.equal(totals.late, previewLate, "preview lateness equals persisted lateness");
+  assert.equal(saved.mapping.mode, "late");
+  assert.equal(saved.mapping.dayUnits["2"], "hours", "daily late hours persist independently from special pays");
+  assert.equal(saved.mapping.periodLate.unit, "hours");
+  const [premium] = await sql`select hours::float as hours from attendance_buckets where run_id = ${runId} and code = 'ROT'`;
+  assert.equal(premium.hours, 2, "special pays stay accumulated hours in lateness mode");
+  const [summary] = await sql`select count(*)::int as count from attendance_late_totals where run_id = ${runId}`;
+  assert.equal(summary.count, 0, "reconciled lateness isn't saved twice");
 
   console.log("preview/save parity passed");
   await upload("saved-alias", `Code,Name,26,27,28\n${alias},Synthetic employee,8,8,8`);
@@ -125,6 +145,17 @@ try {
   const active = await sql`select id from import_runs where period_id = ${period.id} and status = 'imported'`;
   assert.equal(active.length, 1, "one attendance import is active per cutoff");
   console.log("saved alias matched; explicit replacement preserved history");
+  await page.goto(`${BASE}/payroll/time-report/${nameMatchId}`, { waitUntil: "networkidle" });
+  await page.getByLabel("Date units", { exact: true }).selectOption("minutes");
+  await page.getByRole("button", { name: "Review mapping" }).click();
+  await page.getByLabel("Replace the previous attendance import", { exact: false }).check();
+  await confirm.click();
+  await page.getByRole("heading", { name: "Attendance grid", exact: true }).waitFor();
+  const [nameSaved] = await sql`select count(*)::int as count, sum(hours)::float as hours, min(employee_id::text) as employee_id from attendance_days where run_id = ${nameMatchId}`;
+  assert.equal(nameSaved.count, 3);
+  assert.equal(nameSaved.hours, 24, "name-matched preview and confirmed attendance agree");
+  assert.equal(nameSaved.employee_id, employee.id, "server confirmation uses the same full-name matcher");
+  console.log("full-name preview/save parity passed");
   await upload("duplicate", `Code,Name,26,27,28\n${alias},Synthetic employee,8,8,8\n${employee.employee_code},Synthetic duplicate,8,8,8`);
   await page.getByRole("button", { name: "Review mapping" }).click();
   assert.ok(await confirm.isDisabled(), "duplicate employee via two codes blocks importing");
