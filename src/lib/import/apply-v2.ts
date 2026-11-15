@@ -1,6 +1,7 @@
 import { isBlockingIssue } from "./review";
 import { premiumMatrix } from "@/lib/payroll/statutory";
 import type { ImportIssue, Sheet } from "./types";
+import { createEmployeeMatcher, normalizeEmployeeCode } from "./match-employee";
 
 /**
  * Pure apply engine for the time-report mapping.
@@ -70,7 +71,6 @@ const FALLBACK_DAY_HOURS = 8;
 export const bucketColumns = (value: number | number[] | undefined): number[] =>
   value === undefined ? [] : Array.isArray(value) ? value : [value];
 
-const normalizeCode = (value: string) => value.trim().replace(/\s+/g, " ").toUpperCase();
 const round2 = (value: number) => Math.round(value * 100) / 100;
 
 function isoDate(date: Date) {
@@ -87,12 +87,7 @@ export function applyMappingV2(input: ApplyV2Input): ApplyV2Output {
 
   if (mapping.employeeCode == null) throw new Error("The mapping has no employee code column");
 
-  const byCode = new Map<string, string>();
-  for (const employee of employees) byCode.set(normalizeCode(employee.employeeCode), employee.id);
-  for (const alias of externalIds) {
-    const code = normalizeCode(alias.code);
-    if (!byCode.has(code)) byCode.set(code, alias.employeeId);
-  }
+  const matchEmployee = createEmployeeMatcher(employees, externalIds);
 
   const issues: ImportIssue[] = [];
   const days: ApplyV2Output["days"] = [];
@@ -173,20 +168,23 @@ export function applyMappingV2(input: ApplyV2Input): ApplyV2Output {
     if (!row) continue;
 
     const rawCode = row[mapping.employeeCode]?.text ?? "";
-    const code = normalizeCode(rawCode);
-    if (!code) continue;
+    const code = normalizeEmployeeCode(rawCode);
+    const name = mapping.employeeName == null ? "" : row[mapping.employeeName]?.text.trim() ?? "";
+    if (!code && !name) continue;
 
     rowsRead += 1;
 
-    const employeeId = byCode.get(code);
+    const { employeeId, ambiguous } = matchEmployee(code, name);
     if (!employeeId) {
-      unknown.add(code);
+      if (code) unknown.add(code);
       pushIssue({
         row: rowIndex + 1,
         column: mapping.employeeCode,
         code,
         kind: "unknown_employee",
-        message: `Code ${code} is not bound to an employee in this company.`,
+        message: ambiguous
+          ? `More than one employee matches ${code || name}. Choose the correct employee or correct the source identifier.`
+          : `No employee matches ${code || name} in this company. Check the code and full name or choose an employee.`,
       });
       continue;
     }
